@@ -60,7 +60,7 @@ func solveSliderCaptcha(
 	// componentDone call was for the checkbox path; slider needs its
 	// own. Same browser_fp + device — those are session-scoped, not
 	// per-widget. Failure here is non-fatal: try getContent anyway.
-	componentDoneData := baseParams + "&browser_fp=" + browserFp + "&device=" + deviceParam
+	componentDoneData := baseParams + "&browser_fp=" + browserFp + "&device=" + deviceParam + accessTokenSuffix
 	if _, err := vkReq("captchaNotRobot.componentDone", componentDoneData); err != nil {
 		log.Printf("slider: pre-getContent componentDone failed (non-fatal): %v", err)
 	}
@@ -120,8 +120,12 @@ func solveSliderCaptcha(
 			neturl.QueryEscape(cursor),
 			neturl.QueryEscape("[]"), neturl.QueryEscape("[]"), neturl.QueryEscape("[]"),
 			browserFp, hash, neturl.QueryEscape(answer),
-			"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-		)
+			// Hardcoded canonical debug_info constant — matches Safari
+			// fallback (window.vk?.brlefapmjnpg || "a0ac4896..."). Same
+			// rationale as captcha_pow.go check, applied to slider for
+			// consistency. Phase 2 (build 93) fix extended here.
+			"a0ac4896e9b899f78d905fd37c5adb2b768aa955eb7b2a7bcba6ee2a44a96daf",
+		) + accessTokenSuffix
 
 		checkResp, err := vkReq("captchaNotRobot.check", checkData)
 		if err != nil {
@@ -171,6 +175,7 @@ func requestSliderContentWithFallback(vkReq vkReqFunc, baseParams, sliderSetting
 		if withSettings && sliderSettings != "" {
 			data += "&captcha_settings=" + neturl.QueryEscape(sliderSettings)
 		}
+		data += accessTokenSuffix
 		resp, err := vkReq("captchaNotRobot.getContent", data)
 		if err != nil {
 			return nil, "", err

@@ -1,6 +1,8 @@
 package proxy
 
 import (
+	"compress/flate"
+	"compress/gzip"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -18,8 +20,12 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/andybalholm/brotli"
+	"github.com/klauspost/compress/zstd"
 )
 
 // captchaPowProfile stores the browser profile for the current PoW session.
@@ -115,7 +121,23 @@ func randomHex(n int) string {
 	return hex.EncodeToString(b)
 }
 
-// newSessionClient creates an HTTP client with a shared cookie jar and Chrome TLS fingerprint.
+// newSessionClient creates an HTTP client with a shared cookie jar.
+//
+// TLS fingerprint: HelloChrome_Auto (= HelloChrome_133 in uTLS v1.8.2),
+// which is structurally identical to Safari iOS 17 ClientHello. Both
+// browsers converged on the same modern TLS extensions (X25519MLKEM768,
+// ECH, ALPS, Brotli compress_certificate, GREASE positions, extension
+// shuffle, identical cipher list + supported_groups + signature
+// algorithms). HelloIOS_Auto in v1.8.2 maps to HelloIOS_14, which is
+// strictly older and DIFFERENT from real iOS 17 — switching to it
+// would be a downgrade. So Chrome_Auto stays even for the Safari-UA
+// captcha session: at the TLS layer there is no detectable difference
+// between Chrome 133 and Safari iOS 17.
+//
+// Phase 4 of the 2026-05-15 PoW regression investigation briefly tried
+// HelloIOS_Auto on the assumption that UA/TLS mismatch was the bot
+// signal — empirically wrong; the previous session had already
+// established TLS identity. Reverted in build 96.
 func newSessionClient() *http.Client {
 	jar, _ := cookiejar.New(nil)
 	return &http.Client{
@@ -177,12 +199,19 @@ func solveCaptchaPoW(ctx context.Context, redirectURI, captchaSID, userAgent str
 		return "", "", ctx.Err()
 	}
 
-	// Step 1: Fetch captcha page and extract PoW parameters + cookies + slider settings
-	powInput, difficulty, htmlSettings, err := fetchPoW(ctx, client, redirectURI)
+	// Step 1: Fetch captcha page and extract PoW parameters + cookies + slider settings + JS bundle URL
+	powInput, difficulty, scriptURL, htmlSettings, err := fetchPoW(ctx, client, redirectURI)
 	if err != nil {
 		return "", "", fmt.Errorf("fetch PoW: %w", err)
 	}
-	log.Printf("pow: input=%s difficulty=%d htmlSettings=%v", powInput, difficulty, htmlSettings != nil)
+	log.Printf("pow: input=%s difficulty=%d htmlSettings=%v scriptURL=%s", powInput, difficulty, htmlSettings != nil, scriptURL)
+
+	// Phase 6: Pull the version-specific debug_info constant from the
+	// captcha JS bundle. Falls back to hardcoded value if the bundle URL
+	// wasn't extracted or if regex doesn't match the JS contents. Cache
+	// is keyed on full scriptURL (versioned path) so VK rotating the
+	// constant via a JS bump auto-invalidates.
+	debugInfo := fetchAndCacheDebugInfo(ctx, client, scriptURL)
 
 	// Log cookies received from page load (for debugging)
 	if parsedURL, e := url.Parse("https://id.vk.ru"); e == nil {
@@ -200,8 +229,8 @@ func solveCaptchaPoW(ctx context.Context, redirectURI, captchaSID, userAgent str
 	// is empty (verified) so it's purely a Safari-mimicry signal; the adFp
 	// is included in captchaNotRobot.check body where VK now requires it
 	// to be present (since some VK update around 2026-05-08/09).
-	adFp := genAdFp()
-	log.Printf("pow: generated adFp=%s for captchaNotRobot.check", adFp)
+	adFp := getSessionAdFp()
+	log.Printf("pow: using session adFp=%s for this PoW solve", adFp)
 	fetchAdFpPing(ctx, client)
 
 	// Step 2: Solve PoW (brute-force SHA-256)
@@ -215,7 +244,7 @@ func solveCaptchaPoW(ctx context.Context, redirectURI, captchaSID, userAgent str
 	time.Sleep(time.Duration(200+mathrand.Intn(300)) * time.Millisecond)
 
 	// Step 3: Call captchaNotRobot API sequence (using same client = same cookies)
-	successToken, showType, err := callCaptchaNotRobotAPI(ctx, client, sessionToken, hash, adFp, htmlSettings)
+	successToken, showType, err := callCaptchaNotRobotAPI(ctx, client, sessionToken, hash, adFp, debugInfo, htmlSettings)
 	if err != nil {
 		return "", showType, fmt.Errorf("captchaNotRobot API: %w", err)
 	}
@@ -224,11 +253,95 @@ func solveCaptchaPoW(ctx context.Context, redirectURI, captchaSID, userAgent str
 	return successToken, showType, nil
 }
 
+// debugInfoCache maps captcha-script URL → extracted debug_info hex
+// constant. Per Moroka8/vk-turn-proxy commit 21cf9fa: the constant is
+// versioned (path includes vkid/<version>/not_robot_captcha.js), VK
+// rotates it when bumping the captcha JS bundle. Caching by full URL
+// auto-invalidates on version change.
+var debugInfoCache sync.Map
+
+// debugInfoRegex extracts the constant fallback from the captcha JS:
+//
+//	debug_info: (window.vk?.brlefapmjnpg) || "a0ac4896...64hex..."
+//
+// or older: debug_info: "a0ac4896..."
+//
+// Captures the 64-hex string. If the JS structure changes the fallback
+// extraction fails and we use the hardcoded constant from build 93 as
+// last resort.
+var debugInfoRegex = regexp.MustCompile(`debug_info:(?:[^"]*\|\|)?"([a-fA-F0-9]{64})"`)
+
+// captchaJSRegex finds the not_robot_captcha.js script URL embedded in
+// the captcha HTML page so we can fetch it and extract debug_info.
+var captchaJSRegex = regexp.MustCompile(`src="(https://[^"]+not_robot_captcha[^"]+)"`)
+
+// hardcodedDebugInfo is the build-93 fallback constant captured from
+// Safari WKWebView 2026-05-15. Used when dynamic extraction fails.
+const hardcodedDebugInfo = "a0ac4896e9b899f78d905fd37c5adb2b768aa955eb7b2a7bcba6ee2a44a96daf"
+
+// fetchAndCacheDebugInfo GETs the captcha JS bundle, extracts the
+// debug_info constant via debugInfoRegex, caches by script URL, and
+// returns the extracted value. Returns hardcodedDebugInfo on any
+// failure (regex miss, HTTP error, parse error) — the captcha attempt
+// will still be made with the previously-canonical value rather than
+// failing outright.
+//
+// Phase 6 of the 2026-05-15 PoW regression investigation: ports
+// dynamic extraction from Moroka8 captcha v2. If VK rotates the
+// constant in a future JS version (bumping the vkid/X.Y.Z path), we
+// pick it up automatically; build 93's hardcoded value would have
+// become stale.
+func fetchAndCacheDebugInfo(ctx context.Context, client *http.Client, scriptURL string) string {
+	if scriptURL == "" {
+		return hardcodedDebugInfo
+	}
+	if cached, ok := debugInfoCache.Load(scriptURL); ok {
+		return cached.(string)
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", scriptURL, nil)
+	if err != nil {
+		log.Printf("pow: debug_info fetch req-build failed (%v) — falling back to hardcoded constant", err)
+		return hardcodedDebugInfo
+	}
+	req.Header.Set("User-Agent", captchaPowProfile.UserAgent)
+	req.Header.Set("Accept", "text/javascript,*/*")
+	req.Header.Set("Accept-Encoding", safariAcceptEncoding)
+	req.Header.Set("Accept-Language", "en-GB,en;q=0.9")
+	req.Header.Set("Referer", "https://id.vk.ru/")
+	req.Header.Set("Sec-Fetch-Dest", "script")
+	req.Header.Set("Sec-Fetch-Mode", "no-cors")
+	req.Header.Set("Sec-Fetch-Site", "same-site")
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("pow: debug_info fetch failed (%v) — falling back to hardcoded constant", err)
+		return hardcodedDebugInfo
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := readDecompressedBody(resp)
+	if err != nil {
+		log.Printf("pow: debug_info read body failed (%v) — falling back to hardcoded constant", err)
+		return hardcodedDebugInfo
+	}
+	m := debugInfoRegex.FindSubmatch(body)
+	if len(m) < 2 {
+		log.Printf("pow: debug_info regex no match in JS (%d bytes) — falling back to hardcoded constant", len(body))
+		return hardcodedDebugInfo
+	}
+	value := string(m[1])
+	debugInfoCache.Store(scriptURL, value)
+	log.Printf("pow: debug_info extracted from %s = %s (cached)", scriptURL, value)
+	return value
+}
+
 // fetchPoW fetches the captcha HTML page and extracts PoW parameters.
-func fetchPoW(ctx context.Context, client *http.Client, redirectURI string) (powInput string, difficulty int, htmlSettings map[string]interface{}, err error) {
+// scriptURL is the captcha JS bundle URL (e.g. https://static.vk.ru/vkid/
+// 1.1.1331/not_robot_captcha.js), used by fetchAndCacheDebugInfo to
+// extract the version-specific debug_info constant. Empty if extraction
+// fails (caller falls back to hardcodedDebugInfo).
+func fetchPoW(ctx context.Context, client *http.Client, redirectURI string) (powInput string, difficulty int, scriptURL string, htmlSettings map[string]interface{}, err error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", redirectURI, nil)
 	if err != nil {
-		return "", 0, nil, err
+		return "", 0, "", nil, err
 	}
 	// Headers calibrated for Safari iOS 17 mobile (see vkReq for full
 	// rationale). For the document GET we keep navigate-mode Sec-Fetch
@@ -238,6 +351,7 @@ func fetchPoW(ctx context.Context, client *http.Client, redirectURI string) (pow
 	// → en-GB matching captured device.language.
 	req.Header.Set("User-Agent", captchaPowProfile.UserAgent)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Accept-Encoding", safariAcceptEncoding)
 	req.Header.Set("Accept-Language", "en-GB,en;q=0.9")
 	req.Header.Set("Cache-Control", "no-cache")
 	req.Header.Set("Pragma", "no-cache")
@@ -250,16 +364,24 @@ func fetchPoW(ctx context.Context, client *http.Client, redirectURI string) (pow
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", 0, nil, fmt.Errorf("HTTP GET failed: %w", err)
+		return "", 0, "", nil, fmt.Errorf("HTTP GET failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	log.Printf("pow: fetchPoW HTTP status=%d", resp.StatusCode)
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := readDecompressedBody(resp)
 	if err != nil {
-		return "", 0, nil, err
+		return "", 0, "", nil, fmt.Errorf("read body (Content-Encoding=%q): %w",
+			resp.Header.Get("Content-Encoding"), err)
 	}
+	// Phase 3 diagnostic: log cookies the jar received from the page GET.
+	// Real Safari accumulates remixlang/remixstid/remixstlid here and
+	// replays them on subsequent api.vk.ru POSTs. Verify our jar does the
+	// same — if it shows zero cookies after the page GET, that's a strong
+	// signal the missing cookies are part of the BOT detection.
+	logCookiesForURL(client.Jar, "https://api.vk.ru", "fetchPoW post-GET (api.vk.ru)")
+	logCookiesForURL(client.Jar, "https://id.vk.ru", "fetchPoW post-GET (id.vk.ru)")
 	html := string(body)
 
 	powRe := regexp.MustCompile(`const\s+powInput\s*=\s*"([^"]+)"`)
@@ -270,7 +392,7 @@ func fetchPoW(ctx context.Context, client *http.Client, redirectURI string) (pow
 			preview = preview[:500]
 		}
 		log.Printf("pow: HTML preview: %s", preview)
-		return "", 0, nil, fmt.Errorf("powInput not found in HTML (%d bytes)", len(html))
+		return "", 0, "", nil, fmt.Errorf("powInput not found in HTML (%d bytes)", len(html))
 	}
 	powInput = m[1]
 
@@ -296,7 +418,18 @@ func fetchPoW(ctx context.Context, client *http.Client, redirectURI string) (pow
 		}
 	}
 
-	return powInput, difficulty, htmlSettings, nil
+	// Extract captcha JS bundle URL — used by fetchAndCacheDebugInfo to
+	// pull the version-specific debug_info constant. The URL contains a
+	// vkid/<version>/ path component that auto-invalidates our cache when
+	// VK bumps the captcha bundle.
+	if m := captchaJSRegex.FindStringSubmatch(html); len(m) >= 2 {
+		scriptURL = m[1]
+		log.Printf("pow: captcha script URL %s", scriptURL)
+	} else {
+		log.Printf("pow: captcha script URL not found in HTML — debug_info will use hardcoded fallback")
+	}
+
+	return powInput, difficulty, scriptURL, htmlSettings, nil
 }
 
 
@@ -315,12 +448,99 @@ func solvePoW(powInput string, difficulty int) string {
 	return ""
 }
 
+// readDecompressedBody reads an HTTP response body, transparently
+// decompressing it based on the Content-Encoding header. Needed because
+// when we set Accept-Encoding manually (gzip, deflate, br, zstd — to
+// match Safari's TLS+HTTP fingerprint), Go's HTTP transport disables
+// its built-in transparent gzip decompression and hands us the raw
+// compressed bytes. We have to handle decoding ourselves.
+//
+// Why we set the header explicitly: Safari iOS 17 sends all four
+// algorithms; Go's default (when header unset) is just `gzip`. The
+// difference is a one-bit fingerprint VK can use to flag us as bot.
+// See Phase 3 of the 2026-05-15 PoW regression investigation.
+//
+// brotli + zstd come from indirect deps already in go.sum (used by
+// klauspost/compress and andybalholm/brotli transitively).
+func readDecompressedBody(resp *http.Response) ([]byte, error) {
+	enc := strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Encoding")))
+	var reader io.Reader
+	switch enc {
+	case "", "identity":
+		reader = resp.Body
+	case "gzip":
+		gz, err := gzip.NewReader(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("gzip decoder init: %w", err)
+		}
+		defer func() { _ = gz.Close() }()
+		reader = gz
+	case "deflate":
+		zr := flate.NewReader(resp.Body)
+		defer func() { _ = zr.Close() }()
+		reader = zr
+	case "br":
+		// brotli.Reader has no Close (just an io.Reader).
+		reader = brotli.NewReader(resp.Body)
+	case "zstd":
+		zr, err := zstd.NewReader(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("zstd decoder init: %w", err)
+		}
+		defer zr.Close()
+		reader = zr
+	default:
+		return nil, fmt.Errorf("unsupported Content-Encoding: %q", enc)
+	}
+	return io.ReadAll(reader)
+}
+
+// safariAcceptEncoding matches what Safari iOS 17 sends literally.
+// Set as a request header — see readDecompressedBody for the rationale.
+const safariAcceptEncoding = "gzip, deflate, br, zstd"
+
+// accessTokenSuffix is the Safari-canonical trailing form field on every
+// captchaNotRobot.* body — an empty `access_token=` at the very end.
+// Real Safari sends this after all per-method fields (sensors, browser_fp,
+// hash, debug_info, etc.). Pre-build-94 we put `access_token=` 4th
+// (right after adFp), giving same content but different byte order — a
+// possible fingerprint difference. See callCaptchaNotRobotAPI for the
+// position-by-position comparison with Safari capture 2026-05-15.
+const accessTokenSuffix = "&access_token="
+
+// logCookiesForURL logs the names of cookies that the jar would send to
+// the given URL. Used for diagnostic visibility into whether the captcha
+// session client is correctly accumulating + replaying VK cookies (real
+// Safari sends remixlang/remixstid/remixstlid; we should too after the
+// initial id.vk.ru GET in fetchPoW). Phase 3 diagnostic.
+func logCookiesForURL(jar http.CookieJar, rawURL, label string) {
+	if jar == nil {
+		log.Printf("pow: %s cookie jar is nil", label)
+		return
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		log.Printf("pow: %s cookie URL parse failed: %v", label, err)
+		return
+	}
+	cookies := jar.Cookies(u)
+	if len(cookies) == 0 {
+		log.Printf("pow: %s NO cookies in jar for %s", label, u.Host)
+		return
+	}
+	names := make([]string, len(cookies))
+	for i, c := range cookies {
+		names[i] = c.Name
+	}
+	log.Printf("pow: %s sending %d cookies to %s: %v", label, len(cookies), u.Host, names)
+}
+
 // genAdFp produces a 21-char base64url string used as the `adFp` form field
 // in captchaNotRobot.check. Empirically (Safari WKWebView capture via Web
 // Inspector, 2026-05-11) sync-loader.js from ad.mail.ru generates this
 // client-side as a random tracking ID — VK validates only its presence and
 // format, not its value (no cross-domain handshake with mail.ru). Until
-// today we sent `adFp=` empty in the POST body, which after VK tightened
+// 2026-05-11 we sent `adFp=` empty in the POST body, which after VK tightened
 // bot heuristics dropped PoW success from 88% (build 64 era) to 6% across
 // 49+ attempts on two distinct captured fps. 16 random bytes → 22 base64url
 // chars → truncated to 21 to match the empirically observed length.
@@ -332,6 +552,38 @@ func genAdFp() string {
 		s = s[:21]
 	}
 	return s
+}
+
+var (
+	sessionAdFpVal  string
+	sessionAdFpOnce sync.Once
+)
+
+// getSessionAdFp returns a process-stable adFp value, generated once on
+// first call and reused for every subsequent solveCaptchaPoW. Mimics
+// real Safari's window.rb_sync.id, which is generated by sync-loader.js
+// and persisted in cookie + localStorage for the lifetime of the page
+// (and across page reloads while the cookie is alive).
+//
+// Pre-build-91 we generated a fresh random per solveCaptchaPoW, meaning
+// each of the 3 PoW retries (in creds.go) sent a different adFp. Real
+// Safari sends the SAME adFp across all attempts within the same browser
+// session — and across multiple captcha sessions, since rb_sync persists.
+// The inconsistency was a candidate BOT signal during the 2026-05-15
+// PoW regression investigation (Phase 1; see open question in chat
+// session 76000841 for empirical context). NOT proven to be the cause —
+// this is a hypothesis fix, will be evaluated empirically.
+//
+// Process-scoped (not user-scoped) deliberately: persisting to disk
+// (vk_profile.json) would be more Safari-like but the value is opaque
+// and we have no evidence it matters across process restarts. Easy to
+// promote later if data warrants.
+func getSessionAdFp() string {
+	sessionAdFpOnce.Do(func() {
+		sessionAdFpVal = genAdFp()
+		log.Printf("pow: initialized session adFp=%s (process-stable; reused for all subsequent PoW solves)", sessionAdFpVal)
+	})
+	return sessionAdFpVal
 }
 
 // fetchAdFpPing fires the mail.ru tracking GET that real Safari makes when
@@ -356,6 +608,7 @@ func fetchAdFpPing(ctx context.Context, client *http.Client) {
 	}
 	req.Header.Set("User-Agent", captchaPowProfile.UserAgent)
 	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Accept-Encoding", safariAcceptEncoding)
 	req.Header.Set("Accept-Language", "en-GB,en;q=0.9")
 	req.Header.Set("Origin", "https://id.vk.ru")
 	req.Header.Set("Referer", "https://id.vk.ru/")
@@ -379,7 +632,7 @@ func fetchAdFpPing(ctx context.Context, client *http.Client) {
 //
 // Returns (successToken, lastShowCaptchaType, err). See solveCaptchaPoW for
 // the meaning of lastShowCaptchaType.
-func callCaptchaNotRobotAPI(ctx context.Context, client *http.Client, sessionToken, hash, adFp string, htmlSettings map[string]interface{}) (string, string, error) {
+func callCaptchaNotRobotAPI(ctx context.Context, client *http.Client, sessionToken, hash, adFp, debugInfo string, htmlSettings map[string]interface{}) (string, string, error) {
 	vkReq := func(method, postData string) (map[string]interface{}, error) {
 		reqURL := "https://api.vk.ru/method/" + method + "?v=5.131"
 		req, err := http.NewRequestWithContext(ctx, "POST", reqURL, strings.NewReader(postData))
@@ -397,6 +650,7 @@ func callCaptchaNotRobotAPI(ctx context.Context, client *http.Client, sessionTok
 		// Pragma, Priority — all present in Safari capture.
 		req.Header.Set("User-Agent", captchaPowProfile.UserAgent)
 		req.Header.Set("Accept", "*/*")
+		req.Header.Set("Accept-Encoding", safariAcceptEncoding)
 		req.Header.Set("Accept-Language", "en-GB,en;q=0.9")
 		req.Header.Set("Cache-Control", "no-cache")
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -408,15 +662,23 @@ func callCaptchaNotRobotAPI(ctx context.Context, client *http.Client, sessionTok
 		req.Header.Set("Sec-Fetch-Mode", "cors")
 		req.Header.Set("Sec-Fetch-Site", "same-site")
 
+		// Phase 3 diagnostic: surface what cookies we're sending to VK.
+		// Real Safari sends remixlang/remixstid/remixstlid on every
+		// captchaNotRobot.* call; we should too after fetchPoW (which
+		// GETs id.vk.ru/not_robot_captcha and should accumulate
+		// Set-Cookie headers in the shared jar).
+		logCookiesForURL(client.Jar, reqURL, method)
+
 		httpResp, err := client.Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("HTTP POST %s failed: %w", method, err)
 		}
 		defer func() { _ = httpResp.Body.Close() }()
 
-		body, err := io.ReadAll(httpResp.Body)
+		body, err := readDecompressedBody(httpResp)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("read body (Content-Encoding=%q): %w",
+				httpResp.Header.Get("Content-Encoding"), err)
 		}
 
 		log.Printf("pow: %s response: %s", method, string(body[:min(300, len(body))]))
@@ -433,7 +695,14 @@ func callCaptchaNotRobotAPI(ctx context.Context, client *http.Client, sessionTok
 	// Safari by sync-loader.js. Until 2026-05-11 we sent it empty and PoW
 	// success collapsed to ~6% after VK started enforcing its presence.
 	// See genAdFp + fetchAdFpPing for full mechanism.
-	baseParams := fmt.Sprintf("session_token=%s&domain=%s&adFp=%s&access_token=",
+	//
+	// Body order: session_token & domain & adFp first, then per-method
+	// fields (sensors / browser_fp / hash / answer / debug_info), then
+	// access_token LAST. Matches Safari capture order byte-for-byte
+	// (2026-05-15 captchaNotRobot.check.curl). Pre-build-94 we put
+	// access_token=4th and other fields after — same content, different
+	// byte order, possibly a fingerprint difference. Phase 3 fix.
+	baseParams := fmt.Sprintf("session_token=%s&domain=%s&adFp=%s",
 		url.QueryEscape(sessionToken), url.QueryEscape(domain), url.QueryEscape(adFp))
 
 	// Extract HTML-level show_captcha_type hint. VK embeds a `window.init.data`
@@ -458,8 +727,16 @@ func callCaptchaNotRobotAPI(ctx context.Context, client *http.Client, sessionTok
 	lastShowType := htmlShowType
 
 	// 1/4: settings
+	//
+	// Phase 5 (build 97) skipped this and componentDone on the
+	// hypothesis that Safari WKWebView capture's Web Inspector showed
+	// only check + endSession. EMPIRICALLY DISPROVED — BOT rate
+	// stayed at 100% (vpn.wifi.8.log). Reverted in build 98.
+	// Cross-check with Moroka8/vk-turn-proxy commit 21cf9fa shows
+	// they DO call settings + componentDone — Safari's Inspector
+	// likely missed them due to caching or filter, not absence.
 	log.Printf("pow: 1/4 captchaNotRobot.settings")
-	settingsResp, err := vkReq("captchaNotRobot.settings", baseParams)
+	settingsResp, err := vkReq("captchaNotRobot.settings", baseParams+accessTokenSuffix)
 	if err != nil {
 		return "", lastShowType, fmt.Errorf("settings: %w", err)
 	}
@@ -511,10 +788,9 @@ func callCaptchaNotRobotAPI(ctx context.Context, client *http.Client, sessionTok
 		log.Printf("pow: no captured browser profile, using generated browser_fp+device")
 	}
 
-	componentData := baseParams + fmt.Sprintf("&browser_fp=%s&device=%s", browserFp, deviceParam)
+	componentData := baseParams + fmt.Sprintf("&browser_fp=%s&device=%s", browserFp, deviceParam) + accessTokenSuffix
 
-	_, err = vkReq("captchaNotRobot.componentDone", componentData)
-	if err != nil {
+	if _, err := vkReq("captchaNotRobot.componentDone", componentData); err != nil {
 		return "", lastShowType, fmt.Errorf("componentDone: %w", err)
 	}
 
@@ -542,31 +818,27 @@ func callCaptchaNotRobotAPI(ctx context.Context, client *http.Client, sessionTok
 
 		log.Printf("pow: 3/4 captchaNotRobot.check")
 
-		// Simplified sensor data — empty arrays for most sensors,
-		// minimal cursor path. Reference impl shows VK accepts this
-		// and overly-detailed fake data may trigger detection.
-		now := time.Now().UnixMilli()
-		cursorData := []map[string]interface{}{
-			{"x": 960, "y": 540, "t": now - 2000},
-			{"x": 965, "y": 538, "t": now - 1500},
-			{"x": 970, "y": 535, "t": now - 1000},
-			{"x": 972, "y": 533, "t": now - 500},
-			{"x": 975, "y": 530, "t": now},
-		}
-		cursorBytes, _ := json.Marshal(cursorData)
-
-		// Downlink: small array with realistic values
-		var downlink []float64
-		baseSpeed := 8.0 + mathrand.Float64()*4.0
-		for i := 0; i < 7; i++ {
-			downlink = append(downlink, baseSpeed+mathrand.Float64()*0.5-0.25)
-		}
-		downlinkBytes, _ := json.Marshal(downlink)
+		// Sensor arrays empty across the board — confirmed by Safari
+		// WKWebView capture 2026-05-15 (captchaNotRobot.check.curl).
+		// Real Safari sends `cursor=[]` and `connectionDownlink=[]`,
+		// not fake-but-realistic data we used to send. The fake data
+		// (5 cursor positions + 7 downlink floats) was a try-too-hard
+		// mistake from build 85 era — real iOS Safari just sends []
+		// for checkbox-style captcha (sensor data is only relevant
+		// for slider variant). Sending fake values gave VK an extra
+		// signal to detect us; reverting matches Safari exactly.
+		cursorBytes := []byte("[]")
+		downlinkBytes := []byte("[]")
 
 		answer := base64.StdEncoding.EncodeToString([]byte("{}"))
 
-		// Fixed debug_info hash — a real browser sends consistent value
-		debugInfo := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+		// debug_info — passed in from solveCaptchaPoW.
+		// fetchAndCacheDebugInfo extracts the version-specific constant
+		// from not_robot_captcha.js dynamically (Phase 6 of 2026-05-15
+		// PoW regression investigation, ported from Moroka8 v2 solver).
+		// Falls back to the canonical "a0ac4896..." constant on any
+		// extraction failure. See callCaptchaNotRobotAPI sig + Phase 2
+		// commentary in build 93 for the original hardcoded reasoning.
 
 		checkData := baseParams + fmt.Sprintf(
 			"&accelerometer=%s&gyroscope=%s&motion=%s&cursor=%s&taps=%s&connectionRtt=%s&connectionDownlink=%s"+
@@ -582,7 +854,7 @@ func callCaptchaNotRobotAPI(ctx context.Context, client *http.Client, sessionTok
 			hash,
 			answer,
 			debugInfo,
-		)
+		) + accessTokenSuffix
 
 		checkResp, err := vkReq("captchaNotRobot.check", checkData)
 		if err != nil {
@@ -605,7 +877,7 @@ func callCaptchaNotRobotAPI(ctx context.Context, client *http.Client, sessionTok
 			}
 			time.Sleep(200 * time.Millisecond)
 			log.Printf("pow: 4/4 captchaNotRobot.endSession")
-			_, err = vkReq("captchaNotRobot.endSession", baseParams)
+			_, err = vkReq("captchaNotRobot.endSession", baseParams+accessTokenSuffix)
 			if err != nil {
 				log.Printf("pow: endSession failed (non-fatal): %v", err)
 			}
@@ -633,9 +905,8 @@ func callCaptchaNotRobotAPI(ctx context.Context, client *http.Client, sessionTok
 		log.Printf("pow: slider solver succeeded!")
 		time.Sleep(200 * time.Millisecond)
 		log.Printf("pow: 4/4 captchaNotRobot.endSession")
-		_, err = vkReq("captchaNotRobot.endSession", baseParams)
-		if err != nil {
-			log.Printf("pow: endSession failed (non-fatal): %v", err)
+		if _, esErr := vkReq("captchaNotRobot.endSession", baseParams+accessTokenSuffix); esErr != nil {
+			log.Printf("pow: endSession failed (non-fatal): %v", esErr)
 		}
 		return sliderToken, lastShowType, nil
 	}
