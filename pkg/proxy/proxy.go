@@ -709,29 +709,42 @@ func (p *Proxy) startConnections() error {
 			break
 		}
 
-		// Adaptive backoff: when ALL slots are in 486 cooldown, fixed
-		// 10s retries are guaranteed to keep failing — the only thing
-		// that can possibly help is one of the cooldown timers expiring.
-		// Wait on broadcastSlotAvailable instead, with a deadline equal
-		// to the longest remaining cooldown (+safety). The first slot
-		// to free up wakes us, we retry, and on success the rest of
-		// the conn-stagger launches normally.
+		// Adaptive backoff: when NO slots are usable (either all in 486
+		// cooldown OR partly saturated + empty slots that grower can't
+		// fill), fixed 10s retries are guaranteed to keep failing — the
+		// only thing that can plausibly help is a saturation cooldown
+		// expiring (broadcasts on slotAvailableCh) or grower successfully
+		// seeding an empty slot (also broadcasts). Wait on the channel
+		// instead, with a deadline equal to the longest remaining
+		// cooldown (+safety).
 		//
-		// Without this, a path-change cascade that saturates every slot
-		// would see bootstrap exhaust its 4×10s budget within ~40s,
-		// then return error → other 29 conns never start → only the
-		// next 5-min watchdog tick can recover. Observed in
+		// Why "available == 0" not "saturated == total": when 7 of 12
+		// slots are saturated and the other 5 are empty with grower
+		// blocked by PoW captcha cascade, available = 0 but saturated
+		// (7) != total (12). The old strict condition picked the 10s
+		// backoff path, exhausted 4×10s budget in 40s, and returned —
+		// then the watchdog needed 5+ min to retry. Empirically
+		// observed in vpn.wifi-lte-wifi.2.log 2026-05-15 17:17:15:
+		// bootstrap exhausted at 17:17:45 even though slots [0,1,3,4,5]
+		// would expire at 17:18:54 (a 1m9s wait would have recovered);
+		// instead recovery came at 17:23:15 via second watchdog tick
+		// — wasted 4m20s. Pre-build-90 also hit this in
 		// vpn.wifi-lte-wifi.3.log 2026-05-08 21:21-21:33: 11m13s
 		// outage, ~4 min of which was waiting for the next watchdog
 		// tick after slots 0/2/4 had already cooled down at 21:29:00
 		// but no goroutine was listening for the broadcast.
 		saturated, total, longest := p.credPool.saturationSnapshot()
-		allSaturated := total > 0 && saturated == total
+		available, _, _ := p.credPool.snapshotSize()
+		// canWaitForCooldown requires longest > 0 — without an active
+		// cooldown there's no guaranteed wake-up source (grower-fill
+		// broadcasts could fire but that's not bounded). Fall back to
+		// the 10s default in the no-cooldown case.
+		canWaitForCooldown := total > 0 && available == 0 && longest > 0
 
-		if allSaturated {
+		if canWaitForCooldown {
 			waitFor := longest + allSaturatedWaitSafety
-			log.Printf("proxy: bootstrap attempt %d/%d failed (%v), all %d slots in 486 cooldown — waiting up to %s for slot-available signal",
-				attempt, maxBootstrapAttempts, err, total, waitFor.Round(time.Second))
+			log.Printf("proxy: bootstrap attempt %d/%d failed (%v), %d/%d slots saturated, 0 available — waiting up to %s for slot-available signal",
+				attempt, maxBootstrapAttempts, err, saturated, total, waitFor.Round(time.Second))
 			slotCh := p.credPool.slotAvailableChannel()
 			select {
 			case <-slotCh:
@@ -760,16 +773,20 @@ func (p *Proxy) startConnections() error {
 	}
 
 	if err != nil {
-		// Diagnostic: when all bootstrap attempts get 486 because every
-		// slot's cooldown is active, log a single clear line so post-mortem
-		// readers don't have to correlate N "[conn X] TURN allocate quota
-		// error" lines manually. The watchdog will eventually re-trigger
-		// once cooldowns expire — see vpn.wifi-lte-wifi.1.log 2026-05-08
-		// for the canonical example (10-min outage caused exactly by this
-		// situation).
-		if saturated, total, longest := p.credPool.saturationSnapshot(); saturated == total && total > 0 {
-			log.Printf("proxy: bootstrap exhausted — ALL %d slots in 486 cooldown, longest %s remaining (waiting for VK quota expiry; watchdog will retry)",
-				total, longest.Round(time.Second))
+		// Diagnostic: when bootstrap exhausts because pool has zero
+		// available slots (either all saturated, or partly saturated +
+		// empty slots that grower can't fill due to PoW captcha cascade),
+		// log a single clear line so post-mortem readers don't have to
+		// correlate N "[conn X] TURN allocate quota error" lines
+		// manually. The watchdog will re-trigger after 5 min — see
+		// vpn.wifi-lte-wifi.1.log 2026-05-08 (all-saturated case) and
+		// vpn.wifi-lte-wifi.2.log 2026-05-15 17:17 (partial-saturated +
+		// PoW-blocked case) for canonical examples.
+		saturated, total, longest := p.credPool.saturationSnapshot()
+		available, _, _ := p.credPool.snapshotSize()
+		if total > 0 && available == 0 {
+			log.Printf("proxy: bootstrap exhausted — %d/%d slots saturated (longest %s remaining), 0 available (waiting for cooldown expiry or grower fill; watchdog will retry)",
+				saturated, total, longest.Round(time.Second))
 		}
 
 		// If captcha is required during initial connection, don't fail —
