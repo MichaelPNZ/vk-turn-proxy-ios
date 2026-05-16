@@ -1362,13 +1362,7 @@ struct CaptchaWKWebView: UIViewRepresentable {
             guard !solved else { return }
             solved = true
             log("TOKEN CAPTURED (\(token.count) chars), sending to tunnel")
-            // DEBUG: 90s delay before dismissing WebView so the user can
-            // attach Safari Web Inspector and inspect the post-success
-            // network state, cookies, localStorage. Mirrors the May 11 PoW
-            // diagnostic technique that surfaced the original adFp + UA
-            // mimicry gaps. Remove this delay before any non-debug release.
-            log("DEBUG: holding WebView open 90s for Web Inspector capture before dismiss")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 90) {
+            DispatchQueue.main.async {
                 self.onTokenCaptured(token)
             }
         }
