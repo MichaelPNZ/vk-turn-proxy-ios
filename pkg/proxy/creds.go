@@ -21,6 +21,22 @@ import (
 	"github.com/google/uuid"
 )
 
+// vkAPIHost returns the FQDN used for all api.vk.* method calls
+// (calls.getAnonymousToken, captchaNotRobot.*, etc).
+//
+// Default "api.vk.ru". Override via VK_API_HOST env var — used for
+// the 2026-05-17 evening test that VK Calls iOS app appears to call
+// `api.vk.me` (different FQDN, same backend IPs) and is not captcha-
+// gated for anonymous join. Hypothesis: VK gates per-(FQDN, client_id),
+// so just switching the host might let our existing VK iOS App credentials
+// pass without captcha. See progress_summary_may_17_2026.md for context.
+func vkAPIHost() string {
+	if h := os.Getenv("VK_API_HOST"); h != "" {
+		return h
+	}
+	return "api.vk.ru"
+}
+
 // credExpiryBuffer is the safety margin before a TURN cred's expiry timestamp
 // at which we consider the cred no longer fresh and start refreshing. The
 // expiry comes from VK's TURN REST API (draft-uberti-behave-turn-rest):
@@ -189,6 +205,23 @@ func GetVKCreds(linkID string, captchaSolver CaptchaSolver, solvedCaptchaSID, so
 			// Shuffle the list so each connection attempt uses a different order.
 			creds = make([]vkCredentials, len(vkCredentialsList))
 			copy(creds, vkCredentialsList)
+			// DIAGNOSTIC (2026-05-17 api.vk.me test): filter to one specific
+			// client_id if VK_CLIENT_ID_ONLY env var is set. Used to isolate
+			// which client_id is captcha-gated on api.vk.me. Remove after
+			// experiment resolves.
+			if only := os.Getenv("VK_CLIENT_ID_ONLY"); only != "" {
+				filtered := creds[:0]
+				for _, vc := range creds {
+					if vc.ClientID == only {
+						filtered = append(filtered, vc)
+					}
+				}
+				creds = filtered
+				if len(creds) == 0 {
+					return nil, fmt.Errorf("VK_CLIENT_ID_ONLY=%q not in vkCredentialsList", only)
+				}
+				log.Printf("vk: VK_CLIENT_ID_ONLY filter active — using only client_id=%s", only)
+			}
 			mathrand.Shuffle(len(creds), func(i, j int) { creds[i], creds[j] = creds[j], creds[i] })
 		}
 
@@ -308,7 +341,7 @@ func getVKCredsWithClientID(linkID string, vc vkCredentials, captchaSolver Captc
 		return s, nil
 	}
 
-	step2URL := fmt.Sprintf("https://api.vk.ru/method/calls.getAnonymousToken?v=5.275&client_id=%s", vc.ClientID)
+	step2URL := fmt.Sprintf("https://%s/method/calls.getAnonymousToken?v=5.275&client_id=%s", vkAPIHost(), vc.ClientID)
 
 	// Step 1: get anonymous messages token
 	// If savedToken1 is provided (captcha retry), reuse it instead of fetching a new one.
@@ -330,7 +363,7 @@ func getVKCredsWithClientID(linkID string, vc vkCredentials, captchaSolver Captc
 
 	// Step 1.5: call getCallPreview (warms up the session, as in reference impl)
 	previewData := fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&access_token=%s", linkID, token1)
-	_, _ = doRequest(previewData, fmt.Sprintf("https://api.vk.ru/method/calls.getCallPreview?v=5.275&client_id=%s", vc.ClientID))
+	_, _ = doRequest(previewData, fmt.Sprintf("https://%s/method/calls.getCallPreview?v=5.275&client_id=%s", vkAPIHost(), vc.ClientID))
 
 	// Step 2: get anonymous call token (with captcha retry)
 	var token2 string
@@ -349,6 +382,13 @@ func getVKCredsWithClientID(linkID string, vc vkCredentials, captchaSolver Captc
 		resp, err = doRequest(step2Data, step2URL)
 		if err != nil {
 			return nil, fmt.Errorf("step2: %w", err)
+		}
+
+		// DIAGNOSTIC (2026-05-17 api.vk.me test): always dump step2 response
+		// so we can see what api.vk.me returns differently from api.vk.ru.
+		// Remove after the hypothesis is resolved.
+		if respJSON, mErr := json.Marshal(resp); mErr == nil {
+			log.Printf("vk: step2 response (host=%s, attempt=%d): %s", vkAPIHost(), attempt+1, string(respJSON))
 		}
 
 		// Check for captcha (VK error code 14)

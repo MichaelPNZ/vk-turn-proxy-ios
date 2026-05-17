@@ -1057,7 +1057,7 @@ func randomUUIDish() string {
 // the meaning of lastShowCaptchaType.
 func callCaptchaNotRobotAPI(ctx context.Context, client tls_client.HttpClient, sessionToken, hash, adFp, debugInfo string, htmlSettings map[string]interface{}) (string, string, error) {
 	vkReq := func(method, postData string) (map[string]interface{}, error) {
-		reqURL := "https://api.vk.ru/method/" + method + "?v=5.131"
+		reqURL := "https://" + vkAPIHost() + "/method/" + method + "?v=5.131"
 		req, err := fhttp.NewRequestWithContext(ctx, "POST", reqURL, strings.NewReader(postData))
 		if err != nil {
 			return nil, err
