@@ -3487,10 +3487,25 @@ const (
 	// AND serverProbeable hasn't been set true by any other conn,
 	// pongsReceived=0 is treated as "server unreachable for probing,
 	// can't classify" — same handling as before.
-	shapeProbeBurstCount    = 30
-	shapeProbeSpacing       = 50 * time.Millisecond // 30 × 50ms = 1.5s
+	//
+	// Build 114: длинный диагностический burst (30s) чтобы понять
+	// есть ли у iPhone NE TCP per-conn sustained cap. Mac bw_test на
+	// том же relay+dest выдаёт 257 KB/s sustained за 30s — наша probe
+	// burst на iPhone (build 112: 5s, build 113: 1.5s) даёт 11-14 KB/s
+	// server-rx. Вопрос: это структурный per-conn cap iOS NE или это
+	// TCP slow-start не успевает за 1-5s? 30-секундный burst даст
+	// ответ:
+	//   - Если server-rx подскочит до 500+/600 probes (= 21 KB/s+ к
+	//     серверу) — был slow-start, в sustained режиме всё хорошо
+	//   - Если останется ~150-200 probes / 30s (= 6-9 KB/s) — есть
+	//     реальный per-conn cap, копаем дальше где
+	// Killer всё ещё disabled (build 113) — это чисто диагностический
+	// прогон. Per-conn оценка теперь 30s+ вместо 2s — холодный старт
+	// 10 conn'ов станет очень медленным, но это ради измерения.
+	shapeProbeBurstCount    = 600
+	shapeProbeSpacing       = 50 * time.Millisecond // 600 × 50ms = 30s
 	shapeProbePacketSize    = 1280                  // bytes per probe (incl. magic+seq)
-	shapeProbeWindowAfter   = 500 * time.Millisecond
+	shapeProbeWindowAfter   = 5 * time.Second
 	shapeProbeRateThreshold = 12 * 1024 // bytes/s — below = shaped (DIAGNOSTIC label only, no kill)
 )
 
