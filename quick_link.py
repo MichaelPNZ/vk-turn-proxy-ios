@@ -31,15 +31,24 @@ missing or empty):
     allowedIPs       — e.g. "0.0.0.0/0"
     vkLink           — https://vk.me/join/<token>
     peerAddress      — e.g. "1.2.3.4:51820" (the WG server, not the TURN)
-    useDTLS          — true unless you specifically run a no-DTLS server
-    useWrap          — true if your server runs the WRAP layer (recommended)
-    wrapKeyHex       — 64 hex chars matching server's -wrap-key (or "" if useWrap=false)
 
 Optional fields (omitted from the link if left empty / commented out):
 
     dnsServers       — e.g. "1.1.1.1"; if absent, importer keeps its current value
     numConnections   — int 1..50; if absent, importer keeps its current value
                        (default 30 in the iOS app)
+    useDTLS          — bool. Made Optional in iOS build 129 (UI toggle had
+                       been removed in build 127). Default true on the iOS
+                       side — omit unless you specifically need to force
+                       the no-DTLS direct-mode for debugging.
+    useWrap          — bool. Made Optional in iOS build 129 (UI toggle had
+                       been removed in build 115). WRAP is largely deprecated
+                       since VK changed shape policy 2026-05-18; only set if
+                       your peerAddress points at a -wrap-enabled server and
+                       you have a matching wrapKeyHex below. Default false
+                       on the iOS side.
+    wrapKeyHex       — 64 hex chars matching server's -wrap-key. Only meaningful
+                       when useWrap=true. Made Optional in iOS build 129.
     useSrtp          — bool, added 2026-05-20 (iOS build 115+). True means
                        client uses the DTLS+SRTP transport that bypasses VK's
                        per-allocation shape policy — server must run with the
@@ -55,6 +64,12 @@ Optional fields (omitted from the link if left empty / commented out):
                        if your network blocks/throttles TCP to the relay and
                        you'd rather take VK's allocation-rate hit. If absent,
                        importer keeps current value (default false / TCP).
+
+Compat note: links generated against iOS build 128 or earlier MUST include
+useDTLS, useWrap, and wrapKeyHex (iOS Codable rejects the link otherwise).
+Build 129+ accepts their absence. quick_link.py keeps them in CONFIG with
+safe defaults so links work with both eras — only delete them from CONFIG
+if you know all importers are on build 129+.
 
 What this DOES NOT include and never should:
 
@@ -82,13 +97,19 @@ CONFIG = {
     "allowedIPs":     "0.0.0.0/0",
     "vkLink":         "REPLACE_ME",         # https://vk.me/join/...
     "peerAddress":    "REPLACE_ME",         # ip:port of the WG server
-    "useDTLS":        True,
-    "useWrap":        True,
-    "wrapKeyHex":     "REPLACE_ME",         # 64 hex chars
 
     # ----- optional (delete keys to omit them from the link) -----
     "dnsServers":     "1.1.1.1",
     "numConnections": 30,
+    # useDTLS / useWrap / wrapKeyHex were required before iOS build 129
+    # (they corresponded to UI toggles that have since been removed —
+    # useDTLS in build 127, useWrap in build 115). Kept in CONFIG with
+    # safe defaults so links work against both build-128-and-earlier
+    # (which require these fields) and build-129+ (which accept their
+    # absence). Delete them only if you know every importer is on 129+.
+    "useDTLS":        True,                 # default; legacy DTLS+WG fallback
+    "useWrap":        False,                # WRAP largely defunct since 2026-05-18
+    "wrapKeyHex":     "",                   # 64 hex chars, only if useWrap=True
     # useSrtp / useUDP: see docstring at top for semantics. Both default
     # false (safe for users on the legacy DTLS+WG path). Set useSrtp=true
     # only if the peerAddress points at a -srtp-enabled server. Set
@@ -101,7 +122,6 @@ REQUIRED = (
     "privateKey", "peerPublicKey", "presharedKey",
     "tunnelAddress", "allowedIPs",
     "vkLink", "peerAddress",
-    "useDTLS", "useWrap", "wrapKeyHex",
 )
 
 # Schema version must match BackupManager.supportedConfigVersion in the
@@ -122,21 +142,18 @@ def validate(settings):
     missing = []
     for key in REQUIRED:
         val = settings.get(key)
-        # useDTLS / useWrap can be False; explicit None / "" / "REPLACE_ME"
-        # is the failure case for everything else.
-        if key in ("useDTLS", "useWrap"):
-            if val is None:
-                missing.append(key)
-        else:
-            if val in (None, "", "REPLACE_ME"):
-                missing.append(key)
+        if val in (None, "", "REPLACE_ME"):
+            missing.append(key)
     if missing:
         raise SystemExit(
             f"ERROR: missing or placeholder required fields: {', '.join(missing)}\n"
             f"Edit the CONFIG dict at the top of quick_link.py (or your input "
             f"JSON) and rerun."
         )
-    if settings.get("useWrap") and len(settings.get("wrapKeyHex", "")) != 64:
+    # wrapKeyHex sanity-check kept only when useWrap is explicitly true —
+    # both fields are now optional, but if the admin set useWrap=true they
+    # almost certainly want the key validated too.
+    if settings.get("useWrap") and len(settings.get("wrapKeyHex", "") or "") != 64:
         raise SystemExit(
             "ERROR: useWrap=True but wrapKeyHex is not 64 hex chars (32 bytes). "
             "Generate one with: openssl rand -hex 32"
