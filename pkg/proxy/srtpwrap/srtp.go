@@ -567,12 +567,28 @@ func (c *wrappedConn) Read(b []byte) (int, error) {
 }
 
 func (c *wrappedConn) Write(b []byte) (int, error) {
+	// Lock held for the entire method, not just the seq/ts increment.
+	// runSRTPSession spawns TWO goroutines that both call srtpConn.Write
+	// on the same wrappedConn: the probe sender (proxy.go:3901+, writes
+	// 12-byte ping packets on ticker and on every wake event) and the
+	// send goroutine (proxy.go:4018+, writes WG payload from sendCh).
+	// pion's srtp.Context.EncryptRTP is NOT safe for concurrent use —
+	// its HMAC-SHA1 keeps internal state across Sum() calls, and two
+	// concurrent EncryptRTP calls corrupt that state. Build 125 panicked
+	// in production on 2026-05-21 22:22:38 with "panic: d.nx != 0" from
+	// crypto/sha1.(*digest).checkSum, triggered when a wake event fired
+	// active-probe-on-wake at the same instant WG data was flowing.
+	// The per-conn scratch buffers (txMarshalBuf, txEncBuf) added in
+	// build 123 are also unsafe under concurrent Write — releasing the
+	// lock early would let one Write call overwrite another's MarshalTo
+	// target. Hold the lock through to the underlying socket WriteTo.
 	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	seq := c.seq
 	ts := c.ts
 	c.seq++
 	c.ts += uint32(len(b))
-	c.mu.Unlock()
 
 	pkt := rtp.Packet{
 		Header: rtp.Header{
