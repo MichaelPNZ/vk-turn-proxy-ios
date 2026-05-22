@@ -270,7 +270,23 @@ struct SettingsView: View {
                     .autocapitalization(.none)
                     .disableAutocorrection(true)
 
-                Toggle("DTLS Obfuscation", isOn: $useDTLS)
+                // "DTLS Obfuscation" toggle removed from UI 2026-05-22
+                // (build 127). The toggle was misleading: on the SRTP
+                // path it is ignored entirely (dispatcher prefers UseSrtp
+                // in runConnection), and on the legacy path turning it
+                // OFF lands in runDirectSession where conns "establish"
+                // but no real traffic flows (VK TURN drops raw WG
+                // payload without the DTLS envelope). Empirically
+                // verified 2026-05-22 (vpn.wifi.nodtls.log): 30 conns
+                // allocated, conn-stats final showed 30 idle with 0 RX —
+                // tunnel up by NEVPNStatus but no actual internet.
+                //
+                // Default @AppStorage value stays true so existing users
+                // keep working on the DTLS+WG fallback path. The
+                // useDTLS field still round-trips through BackupManager
+                // for backups + Connection Links, so power users can
+                // flip it via export-edit-import if they really want
+                // the direct-mode for debugging.
 
                 // SRTP transport: frames every tunnel packet as DTLS+SRTP
                 // (RTP PayloadType 100, mimicking VP8 WebRTC video) so
