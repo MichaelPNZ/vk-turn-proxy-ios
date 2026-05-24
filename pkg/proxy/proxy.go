@@ -2293,17 +2293,31 @@ func (p *Proxy) runDTLSSession(sessCtx context.Context, linkID string, readyCh c
 				probeStart := time.Now()
 				deadline := probeStart.Add(30 * time.Second)
 				echoed := false
+				// Reusable timer to avoid spawning a fresh *time.Timer +
+				// channel per loop iteration. With time.After(100ms) every
+				// iteration leaks a transient timer until it fires; under
+				// wake-event bursts (30 conns × ~7 iterations until pong
+				// arrives) the burst of ~210 transient timers contributes
+				// to GC pressure that pushed us past the iOS NE per-process
+				// memory limit on SRTP path (see build 130 fix in bridge.go
+				// and open_problem_srtp_silent_extension_restarts.md). One
+				// NewTimer + Reset reuses the same runtime timer slot. Same
+				// fix applied below in runSRTPSession (proxy.go:3981+).
+				pollTimer := time.NewTimer(100 * time.Millisecond)
 				for time.Now().Before(deadline) {
 					if p.lastPongSeq[connIdx].Load() >= sentSeq {
 						echoed = true
 						break
 					}
 					select {
-					case <-time.After(100 * time.Millisecond):
+					case <-pollTimer.C:
+						pollTimer.Reset(100 * time.Millisecond)
 					case <-connCtx.Done():
+						pollTimer.Stop()
 						return
 					}
 				}
+				pollTimer.Stop()
 				if !echoed {
 					lastPongS := p.lastPongSeq[connIdx].Load()
 					authCount := p.credPool.authErrorCount(credSlot)
@@ -3978,17 +3992,26 @@ func (p *Proxy) runSRTPSession(sessCtx context.Context, linkID string, readyCh c
 				probeStart := time.Now()
 				deadline := probeStart.Add(30 * time.Second)
 				echoed := false
+				// Reusable timer — see matching fix in runDTLSSession
+				// active-probe-on-wake polling loop (proxy.go:2293+) for
+				// rationale. Avoid per-iteration time.After allocation
+				// burst that contributed to jetsam on SRTP path before
+				// build 130.
+				pollTimer := time.NewTimer(100 * time.Millisecond)
 				for time.Now().Before(deadline) {
 					if p.lastPongSeq[connIdx].Load() >= sentSeq {
 						echoed = true
 						break
 					}
 					select {
-					case <-time.After(100 * time.Millisecond):
+					case <-pollTimer.C:
+						pollTimer.Reset(100 * time.Millisecond)
 					case <-connCtx.Done():
+						pollTimer.Stop()
 						return
 					}
 				}
+				pollTimer.Stop()
 				if !echoed {
 					lastPongS := p.lastPongSeq[connIdx].Load()
 					authCount := p.credPool.authErrorCount(credSlot)

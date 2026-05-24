@@ -1032,21 +1032,28 @@ func init() {
 	// release behaviour was leaving us 4 MB from jetsam after a single
 	// spike).
 	//
-	// 40 MB chosen from the observed baseline of ~37 MB sys at NumConns=50
-	// (steady state with no traffic burst). Stack memory was ~6 MB on top
-	// (excluded from this limit), and Swift / iOS system libraries add
-	// another ~5-10 MB to the process RSS. Total expected RSS at the
-	// limit ≈ 40 + 6 + 7 ≈ 53 MB — uncomfortably close to jetsam, but
-	// the 40-MB cap is on Go's *peak* footprint, not its working set,
-	// so in practice we should sit a few MB below the limit most of the
-	// time and only flirt with it during spikes.
+	// 40 MB was the original choice for DTLS+WG path. Lowered to 35 MB
+	// in build 130 after sysdiagnose PowerLog (2026-05-24) confirmed that
+	// SRTP path was being killed by JETSAM_REASON_MEMORY_PERPROCESSLIMIT
+	// (ReasonCode=7, Namespace=1) — see open_problem_srtp_silent_extension_
+	// restarts.md. SRTP uses ~5 MB more than DTLS+WG (probe sender + NAT
+	// keepalive per conn, pion DTLS-SRTP state, scratch buffers), so the
+	// previous 40 MB limit + Go runtime overhead + spikes during heap
+	// pressure routinely pushed phys_footprint past iOS NE's ~50 MB
+	// ceiling. 35 MB = 70% of ceiling (Go community standard); below 60%
+	// (30 MB) risks GC death spiral on SRTP path where steady-state heap-
+	// inuse is already 11-14 MB + stacks ~4 MB + runtime ~5 MB = ~23 MB
+	// minimum floor.
 	//
-	// If this turns out to cost too much in GC CPU (Go thrashing to stay
-	// below the limit), bumping to 45 MB is the safe direction; if it's
-	// not enough to prevent jetsam, dropping NumConns is a stronger
-	// lever than dropping this further.
-	debug.SetMemoryLimit(40 << 20)
-	log.Printf("bridge: GOMEMLIMIT set to 40 MB (soft cap for jetsam defence)")
+	// Empirical baseline at 35 MB cap is TBD — needs soak after build 130.
+	// Trade-offs vs 40 MB: ~2-3× more GC cycles, possibly +5-10% CPU
+	// during heavy traffic, possible throughput regression of a few % in
+	// speedtest. If those regress noticeably, bump back to 38 MB. If
+	// jetsam still fires at 35 MB, the next lever is reducing live
+	// working set (smaller per-conn buffers, fewer goroutines, lower
+	// NumConns) rather than dropping the limit further.
+	debug.SetMemoryLimit(35 << 20)
+	log.Printf("bridge: GOMEMLIMIT set to 35 MB (soft cap for jetsam defence — lowered from 40 MB in build 130)")
 
 	// Wire the proxy's memstats logger to read this process's
 	// phys_footprint via Mach task_info (see go_get_phys_footprint
