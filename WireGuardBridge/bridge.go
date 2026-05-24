@@ -896,17 +896,40 @@ var (
 func startLogWriter() {
 	logChan = make(chan string, 512)
 	go func() {
+		// Buffer messages locally until logFilePath is set by Swift via
+		// wgSetLogFilePath. Without this, init()-time log calls (the
+		// GOMEMLIMIT line, the FreeOSMemory scheduled-periodic line,
+		// etc.) hit a race: if this writer goroutine is scheduled
+		// BEFORE wgSetLogFilePath's body runs, p == "" and the
+		// messages are silently dropped. Empirically this race fired
+		// inconsistently — build 130 captured the GOMEMLIMIT line, build
+		// 131 did not, with no code changes affecting the writer.
+		//
+		// Buffer cap at 1000 lines prevents unbounded growth in case
+		// wgSetLogFilePath is never called (e.g., in tests or some
+		// failure mode). Init() typically emits a handful of lines so
+		// 1000 is generous.
+		var pending []string
+		const pendingCap = 1000
 		for line := range logChan {
 			logFileMu.Lock()
 			p := logFilePath
 			logFileMu.Unlock()
 			if p == "" {
+				if len(pending) < pendingCap {
+					pending = append(pending, line)
+				}
 				continue
 			}
 			f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 			if err != nil {
 				continue
 			}
+			// Flush any buffered init()-time messages first, in order.
+			for _, prev := range pending {
+				f.WriteString(prev)
+			}
+			pending = nil
 			f.WriteString(line)
 			f.Close()
 		}
