@@ -295,6 +295,18 @@ type Proxy struct {
 	connTxBytes []atomic.Int64
 	connRxBytes []atomic.Int64
 
+	// Per-conn last-activity timestamps (UnixNano) for skip-on-recent-tx
+	// wake-probe optimization. Updated alongside connTxBytes/connRxBytes
+	// from the data path goroutines (NOT from probe Writes — probes are
+	// direct dtlsConn.Write / srtpConn.Write that bypass the byte counter
+	// sites). The wake-probe handler reads these and skips probe if the
+	// conn had data traffic within a recent window (5s currently),
+	// reducing the wake-burst peak from 30 simultaneous probes to N_idle.
+	// See open_problem_srtp_silent_extension_restarts.md "Option B" for
+	// rationale and the 2026-05-25 16:27:50 jetsam this addresses.
+	lastTxAt []atomic.Int64
+	lastRxAt []atomic.Int64
+
 	// Per-conn current local IP as observed at TURN allocation time.
 	// Stored as host string (no port) so the pathstats logger can compare
 	// against the OS default-route IP without parsing. Set by runTURN
@@ -360,6 +372,8 @@ func NewProxy(cfg Config) *Proxy {
 		lastActiveProbeAt: make([]atomic.Int64, cfg.NumConns),
 		connTxBytes:       make([]atomic.Int64, cfg.NumConns),
 		connRxBytes:       make([]atomic.Int64, cfg.NumConns),
+		lastTxAt:          make([]atomic.Int64, cfg.NumConns),
+		lastRxAt:          make([]atomic.Int64, cfg.NumConns),
 		connLocalIPs:      make([]atomic.Value, cfg.NumConns),
 		wakeCh:            make(chan struct{}),
 		startedAt:         time.Now(),
@@ -2260,6 +2274,17 @@ func (p *Proxy) runDTLSSession(sessCtx context.Context, linkID string, readyCh c
 				if lastProbe > 0 && time.Since(time.Unix(lastProbe, 0)) < 30*time.Second {
 					continue
 				}
+				// Skip probe if conn had data traffic within last 5s — see
+				// matching change in runSRTPSession wake-probe handler for
+				// full rationale. Defensive parity even though DTLS path is
+				// not currently in production (useSrtp=true by default since
+				// v1.0-build125).
+				if connIdx < len(p.lastTxAt) {
+					recentNs := time.Now().UnixNano() - int64(5*time.Second)
+					if p.lastTxAt[connIdx].Load() > recentNs || p.lastRxAt[connIdx].Load() > recentNs {
+						continue
+					}
+				}
 				// Stagger active-probe firing across the conn pool — see
 				// matching change in runSRTPSession wake-probe handler for
 				// the full rationale. Same pattern, same risk (transient
@@ -2851,6 +2876,11 @@ func (p *Proxy) runTURN(ctx context.Context, turnAddr string, creds *TURNCreds, 
 			// throughput would see.
 			if connIdx >= 0 && connIdx < len(p.connTxBytes) {
 				p.connTxBytes[connIdx].Add(int64(n))
+				// lastTxAt tracks data-path activity for skip-on-recent-tx
+				// wake-probe optimization. Probe Writes (dtlsConn.Write
+				// from the probe goroutine) don't pass through this site
+				// so they don't mark the conn as "recently active".
+				p.lastTxAt[connIdx].Store(time.Now().UnixNano())
 			}
 		}
 	}()
@@ -2906,6 +2936,9 @@ func (p *Proxy) runTURN(ctx context.Context, turnAddr string, creds *TURNCreds, 
 			// handed back to conn2), symmetric with the TX direction.
 			if connIdx >= 0 && connIdx < len(p.connRxBytes) {
 				p.connRxBytes[connIdx].Add(int64(len(payload)))
+				// lastRxAt mirrors lastTxAt update at the TX site — see
+				// connTxBytes block above for rationale.
+				p.lastRxAt[connIdx].Store(time.Now().UnixNano())
 			}
 		}
 	}()
@@ -4035,6 +4068,28 @@ func (p *Proxy) runSRTPSession(sessCtx context.Context, linkID string, readyCh c
 				if lastProbe > 0 && time.Since(time.Unix(lastProbe, 0)) < 30*time.Second {
 					continue
 				}
+				// Skip probe entirely if this conn had data traffic within
+				// the last 5 seconds — it's demonstrably alive, no probe
+				// needed. This is the main mechanism for reducing wake-burst
+				// peak: in the 2026-05-25 16:27:50 jetsam scenario, all 30
+				// conns had 6-19 KB/s RX in the 60s window preceding wake.
+				// Every probe in that burst was redundant. Skip-on-recent-tx
+				// eliminates probes for active conns, leaving only truly-
+				// idle conns to probe (typically a small fraction when phone
+				// is in active use). probeData TX/RX from probe Writes
+				// themselves don't update lastTxAt/lastRxAt — those updates
+				// live only in the data-path goroutines (runTURN and SRTP
+				// send/recv) — so a recent probe doesn't fake the conn into
+				// looking "active". Threshold 5s is conservative: shorter
+				// than typical idle keep-alive cycles but long enough to
+				// cover the brief sleep→wake transition where some recent
+				// traffic just stopped.
+				if connIdx < len(p.lastTxAt) {
+					recentNs := time.Now().UnixNano() - int64(5*time.Second)
+					if p.lastTxAt[connIdx].Load() > recentNs || p.lastRxAt[connIdx].Load() > recentNs {
+						continue
+					}
+				}
 				// Stagger active-probe firing across the conn pool to spread
 				// the post-wake allocation/CPU/probe-Write burst over time.
 				// Without jitter all 30 conns wake() handlers fire
@@ -4139,6 +4194,9 @@ func (p *Proxy) runSRTPSession(sessCtx context.Context, linkID string, readyCh c
 				// transport mode.
 				if connIdx >= 0 && connIdx < len(p.connTxBytes) {
 					p.connTxBytes[connIdx].Add(int64(len(pkt)))
+					// lastTxAt mirror — see DTLS path comment in runTURN
+					// for skip-on-recent-tx rationale.
+					p.lastTxAt[connIdx].Store(time.Now().UnixNano())
 				}
 			}
 		}
@@ -4229,6 +4287,12 @@ func (p *Proxy) runSRTPSession(sessCtx context.Context, linkID string, readyCh c
 			// from the wire.
 			if connIdx >= 0 && connIdx < len(p.connRxBytes) {
 				p.connRxBytes[connIdx].Add(int64(n))
+				// lastRxAt mirror — see DTLS path comment in runTURN
+				// for skip-on-recent-tx rationale. Probe pongs are
+				// filtered above (isProbePacket check + continue), so
+				// they never reach this counter — only data RX marks
+				// the conn as "recently active".
+				p.lastRxAt[connIdx].Store(time.Now().UnixNano())
 			}
 
 			pkt := recvPktPoolGet(n)
