@@ -3240,22 +3240,21 @@ func (p *Proxy) logMemStatsLoop(ctx context.Context) {
 		compressedStr := "n/a"
 		if TaskVMInfoFn != nil {
 			vm := TaskVMInfoFn()
+			// PhysFootprint > 0 is our "task_info syscall succeeded"
+			// sentinel: the C bridge returns an all-zero struct on
+			// KERN_SUCCESS failure. If the syscall worked, ALL fields
+			// are valid measurements (including legitimate 0 — e.g.
+			// vm-reusable=0 means "nothing MADV_FREE'd right now",
+			// vm-compressed=0 means "no swap pressure yet"). Show 0 B
+			// rather than "n/a" so a reader can distinguish measured-zero
+			// from no-measurement.
 			if vm.PhysFootprint > 0 {
 				rssStr = humanBytes(int64(vm.PhysFootprint))
-			}
-			if vm.Internal > 0 {
 				internalStr = humanBytes(int64(vm.Internal))
-			}
-			if vm.External > 0 {
 				externalStr = humanBytes(int64(vm.External))
-			}
-			if vm.Reusable > 0 {
 				reusableStr = humanBytes(int64(vm.Reusable))
+				compressedStr = humanBytes(int64(vm.Compressed))
 			}
-			// Compressed legitimately can be zero (no swap pressure yet),
-			// in which case we still want to log "0 B" rather than "n/a"
-			// to distinguish "we measured zero" from "no measurement".
-			compressedStr = humanBytes(int64(vm.Compressed))
 		}
 		log.Printf("proxy: memstats %s rss=%s vm-internal=%s vm-external=%s vm-reusable=%s vm-compressed=%s sys=%s heap-alloc=%s heap-inuse=%s heap-idle=%s heap-released=%s stack=%s heap-objects=%d goroutines=%d numGC=%d",
 			label,
