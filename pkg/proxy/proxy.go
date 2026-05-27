@@ -208,6 +208,20 @@ type Proxy struct {
 	// Stats
 	txBytes     atomic.Int64
 	rxBytes     atomic.Int64
+
+	// Per-packet counters added 2026-05-27 (build 140) for diagnostic
+	// of the "kernel-buffered packet flood on attach" hypothesis. After
+	// extension respawn, iOS may dump queued TUN packets (accumulated
+	// while extension was dead) into our process. The packet RATE
+	// (delta per 10s memstats tick) shows this as a burst that the
+	// byte counters obscure when packet sizes are small. Counted at the
+	// WG-bind boundary: SendPacket (app→tunnel direction) increments
+	// txPackets per packet WG asked us to send. ReceivePacket
+	// (tunnel→app) increments rxPackets per packet we delivered to WG
+	// for decap. Suspect signature: SendPacket rate >>500/s briefly on
+	// fresh-extension attach.
+	txPackets atomic.Int64
+	rxPackets atomic.Int64
 	activeConns atomic.Int32
 	totalConns  atomic.Int32
 	turnRTTns   atomic.Int64 // nanoseconds
@@ -1437,6 +1451,7 @@ func (p *Proxy) SendPacket(data []byte) error {
 	select {
 	case p.sendCh <- buf:
 		p.txBytes.Add(int64(len(data)))
+		p.txPackets.Add(1)
 		return nil
 	case <-p.ctx.Done():
 		return p.ctx.Err()
@@ -1455,6 +1470,7 @@ func (p *Proxy) ReceivePacket(buf []byte) (int, error) {
 		// Build 133.
 		recvPktPoolPut(pkt)
 		p.rxBytes.Add(int64(n))
+		p.rxPackets.Add(1)
 		return n, nil
 	case <-p.ctx.Done():
 		return 0, p.ctx.Err()
@@ -3226,9 +3242,20 @@ var TaskVMInfoFn func() TaskVMInfo
 // multiple jetsam incidents.
 func (p *Proxy) logMemStatsLoop(ctx context.Context) {
 	const interval = 10 * time.Second
+	// Alert threshold for heap-alloc growth between consecutive ticks.
+	// Empirically (2026-05-27 09:45:29→09:45:39) jetsam was preceded by
+	// heap-alloc +6.6 MB then +10.6 MB tick-over-tick. 5 MB is a tight
+	// gate that catches the spike pattern without triggering on normal
+	// fluctuation (typical tick-delta is ±2 MB under steady idle).
+	const allocSpikeThreshold = 5 * 1024 * 1024 // 5 MB
 
 	tick := time.NewTicker(interval)
 	defer tick.Stop()
+
+	// Previous-tick state for delta computation. Captured by closure
+	// across dump() calls.
+	var prevTxPkt, prevRxPkt int64
+	var prevHeapAlloc uint64
 
 	dump := func(label string) {
 		var ms runtime.MemStats
@@ -3256,7 +3283,21 @@ func (p *Proxy) logMemStatsLoop(ctx context.Context) {
 				compressedStr = humanBytes(int64(vm.Compressed))
 			}
 		}
-		log.Printf("proxy: memstats %s rss=%s vm-internal=%s vm-external=%s vm-reusable=%s vm-compressed=%s sys=%s heap-alloc=%s heap-inuse=%s heap-idle=%s heap-released=%s stack=%s heap-objects=%d goroutines=%d numGC=%d",
+		// Per-tick packet rate deltas added build 140 for diagnostic of
+		// the kernel-buffered packet flood hypothesis. txPkt = WG packets
+		// app→tunnel direction (TUN→WG→bind.Send), rxPkt = WG packets
+		// tunnel→app direction (bind.Receive→WG→TUN). On the "startup"
+		// label both deltas reflect the boot-to-startup window which is
+		// trivial so the number is small and meaningless — kept inline
+		// for format simplicity. On "tick" labels delta is per-10s.
+		curTxPkt := p.txPackets.Load()
+		curRxPkt := p.rxPackets.Load()
+		txPktDelta := curTxPkt - prevTxPkt
+		rxPktDelta := curRxPkt - prevRxPkt
+		prevTxPkt = curTxPkt
+		prevRxPkt = curRxPkt
+
+		log.Printf("proxy: memstats %s rss=%s vm-internal=%s vm-external=%s vm-reusable=%s vm-compressed=%s sys=%s heap-alloc=%s heap-inuse=%s heap-idle=%s heap-released=%s stack=%s heap-objects=%d goroutines=%d numGC=%d tx-pkt=%d rx-pkt=%d",
 			label,
 			rssStr,
 			internalStr,
@@ -3271,7 +3312,27 @@ func (p *Proxy) logMemStatsLoop(ctx context.Context) {
 			humanBytes(int64(ms.StackInuse)),
 			ms.HeapObjects,
 			runtime.NumGoroutine(),
-			ms.NumGC)
+			ms.NumGC,
+			txPktDelta,
+			rxPktDelta)
+
+		// Alloc-spike alert (build 140): if heap-alloc grew more than
+		// allocSpikeThreshold (5 MB) between ticks, emit a dedicated
+		// log line with attribution context (packet rates, GC density,
+		// goroutine count) so we can post-mortem-attribute the spike
+		// even if the kill happens before next tick. Skip on first call
+		// (prevHeapAlloc=0 would trigger a false positive on startup).
+		if prevHeapAlloc > 0 && ms.HeapAlloc > prevHeapAlloc+allocSpikeThreshold {
+			gcSinceLastTick := ms.NumGC // can't compute delta without prev — log absolute
+			log.Printf("proxy: ALLOC-SPIKE detected — heap-alloc +%s in this tick. tx-pkt=%d rx-pkt=%d goroutines=%d heap-objects=%d numGC=%d (compare to prev tick)",
+				humanBytes(int64(ms.HeapAlloc-prevHeapAlloc)),
+				txPktDelta,
+				rxPktDelta,
+				runtime.NumGoroutine(),
+				ms.HeapObjects,
+				gcSinceLastTick)
+		}
+		prevHeapAlloc = ms.HeapAlloc
 	}
 
 	// Emit once at startup so we have a baseline anchor for later
