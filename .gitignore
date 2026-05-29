@@ -26,6 +26,8 @@ build/
 # Go
 vendor/
 *.xcuserdata
+# go test with -memprofile/-c leaves <pkg>.test binaries
+*.test
 
 # App Store Connect API credentials (Issuer ID / Key ID / p8 path)
 AppStoreConnect.env

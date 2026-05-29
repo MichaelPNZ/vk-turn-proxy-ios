@@ -31,6 +31,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pion/dtls/v3"
@@ -117,7 +118,7 @@ func IsRTP(b byte) bool { return b >= 128 && b <= 191 }
 //
 // underlay can be any net.PacketConn — including a TURN-relayed conn
 // returned by pion/turn's client.Allocate().
-func Client(ctx context.Context, underlay net.PacketConn, remote net.Addr) (net.Conn, error) {
+func Client(ctx context.Context, underlay net.PacketConn, remote net.Addr, rxDepthGauge *atomic.Int64) (net.Conn, error) {
 	if underlay == nil {
 		return nil, errors.New("srtpwrap: underlay is nil")
 	}
@@ -148,7 +149,7 @@ func Client(ctx context.Context, underlay net.PacketConn, remote net.Addr) (net.
 	// Using context.Background() as the demux's parent makes that
 	// boundary explicit — only Close ends the demux.
 	demuxCtx, demuxCancel := context.WithCancel(context.Background())
-	go runDemuxFromPacketConn(demuxCtx, underlay, dtlsCh, rtpCh)
+	go runDemuxFromPacketConn(demuxCtx, underlay, dtlsCh, rtpCh, rxDepthGauge)
 
 	adapter := &packetConnAdapter{
 		raw:    underlay,
@@ -505,9 +506,11 @@ type wrappedConn struct {
 	closed    chan struct{}
 	onClose   func()
 
-	dlMu  sync.Mutex
-	dlExp time.Time
-	dlCh  chan struct{}
+	dlMu     sync.Mutex
+	dlExp    time.Time
+	dlCh     chan struct{}
+	dlClosed bool        // dlCh currently closed? recreate before next arm (build 146)
+	dlTimer  *time.Timer // single reusable deadline timer; Reset, not AfterFunc-per-call (build 146)
 
 	// stopDemux is set on the client side so Close() unwinds the
 	// background packet demux goroutine.
@@ -718,6 +721,7 @@ func (c *wrappedConn) deadlineCh() <-chan struct{} {
 	defer c.dlMu.Unlock()
 	if c.dlCh == nil {
 		c.dlCh = make(chan struct{})
+		c.dlClosed = false
 	}
 	return c.dlCh
 }
@@ -728,55 +732,73 @@ func (c *wrappedConn) deadlineExpired() bool {
 	return !c.dlExp.IsZero() && !time.Now().Before(c.dlExp)
 }
 
+// setDl arms the read deadline. Build 146: a single reusable per-conn timer
+// (time.Timer.Reset) replaces the previous make(chan)+time.AfterFunc-per-call
+// design. The runSRTPSession recv goroutine re-arms the deadline before EVERY
+// Read (proxy.go), so at speedtest packet rates the old design allocated a
+// channel + a 30s-pending timer PER PACKET, and each pending timer's closure
+// pinned its channel for the full 30s → ~310k live objects accumulated under
+// load, the dominant driver of the GC death-spiral that pushed phys_footprint
+// to the 50 MB iOS NE jetsam ceiling (confirmed 2026-05-29 via Mac pprof:
+// setDl make(chan) + time.newTimer = 98.7% of inuse_objects). Reusing one timer
+// makes steady-state re-arming allocation-free, and having only ONE timer makes
+// the old "superseded timer double-closes" race structurally impossible.
 func (c *wrappedConn) setDl(t time.Time) {
 	c.dlMu.Lock()
 	defer c.dlMu.Unlock()
-	if c.dlCh != nil {
-		select {
-		case <-c.dlCh:
-		default:
-			close(c.dlCh)
-		}
-	}
-	c.dlCh = make(chan struct{})
 	c.dlExp = t
-	if !t.IsZero() {
-		dur := time.Until(t)
-		if dur <= 0 {
-			close(c.dlCh)
-			return
+	// Read selects on dlCh; it is only ever closed to signal expiry, then must
+	// be replaced with a fresh open channel before the next arm. While the
+	// deadline is repeatedly extended (the hot path), dlCh stays open and is
+	// reused — zero allocation.
+	if c.dlCh == nil || c.dlClosed {
+		c.dlCh = make(chan struct{})
+		c.dlClosed = false
+	}
+	if t.IsZero() {
+		if c.dlTimer != nil {
+			c.dlTimer.Stop()
 		}
-		ch := c.dlCh
-		// Capture ch by value. When the timer fires, we re-acquire the
-		// lock and verify the channel is BOTH (a) still the current
-		// deadline channel (i.e. setDl hasn't replaced it since we
-		// scheduled the timer) AND (b) not already closed. Without these
-		// checks, a sequence of setDl(t1) → setDl(t2) closes ch1 inline
-		// in setDl(t2); when the original timer for ch1 finally fires,
-		// close(ch1) panics with "close of closed channel". Observed
-		// 2026-05-20 build 121 around T+32s of every SRTP session, with
-		// the recv goroutine cycling SetReadDeadline+Read ~30s apart so
-		// the race surfaces predictably as soon as one old deadline
-		// timer outlives the next setDl call.
-		time.AfterFunc(dur, func() {
-			c.dlMu.Lock()
-			defer c.dlMu.Unlock()
-			if c.dlCh != ch {
-				return // a newer setDl has installed a different channel
-			}
-			select {
-			case <-ch:
-				// already closed (by an explicit close path)
-			default:
-				close(ch)
-			}
-		})
+		return
+	}
+	dur := time.Until(t)
+	if dur <= 0 {
+		// Already past — signal immediately.
+		close(c.dlCh)
+		c.dlClosed = true
+		if c.dlTimer != nil {
+			c.dlTimer.Stop()
+		}
+		return
+	}
+	if c.dlTimer == nil {
+		c.dlTimer = time.AfterFunc(dur, c.fireDeadline)
+	} else {
+		c.dlTimer.Reset(dur)
+	}
+}
+
+// fireDeadline runs (on the runtime timer goroutine) when the reusable deadline
+// timer expires. It closes dlCh to wake a blocked Read, but only if the deadline
+// genuinely elapsed and was not pushed into the future by a concurrent setDl (in
+// which case the single timer was already Reset and will fire again later).
+// dlMu serialises this against setDl; the dlExp + dlClosed guards make a stale
+// fire a no-op and prevent close-of-closed.
+func (c *wrappedConn) fireDeadline() {
+	c.dlMu.Lock()
+	defer c.dlMu.Unlock()
+	if c.dlExp.IsZero() || time.Now().Before(c.dlExp) {
+		return // superseded by a later/cleared deadline since this timer armed
+	}
+	if c.dlCh != nil && !c.dlClosed {
+		close(c.dlCh)
+		c.dlClosed = true
 	}
 }
 
 // ─── client-side demux from a single-peer PacketConn ──────────────────────
 
-func runDemuxFromPacketConn(ctx context.Context, raw net.PacketConn, dtlsCh, rtpCh chan<- []byte) {
+func runDemuxFromPacketConn(ctx context.Context, raw net.PacketConn, dtlsCh, rtpCh chan<- []byte, rxDepthGauge *atomic.Int64) {
 	// Cancellation pattern: ReadFrom blocks until a packet actually
 	// arrives. To unblock on ctx cancellation, AfterFunc sets the read
 	// deadline to "now" — the next ReadFrom returns immediately with a
@@ -840,6 +862,22 @@ func runDemuxFromPacketConn(ctx context.Context, raw net.PacketConn, dtlsCh, rtp
 		case IsRTP(pkt[0]):
 			select {
 			case rtpCh <- pkt:
+				// Build 145 diagnostic: record per-interval peak rtpCh depth
+				// here at the producer so the gauge captures the true
+				// high-water mark even while the consumer (wrappedConn.Read →
+				// runSRTPSession recv) is blocked on a full recvCh — the exact
+				// backpressure case the rtpCh-bloat hypothesis targets. Single
+				// writer per conn; CAS-max against the gauge shared across conns.
+				if rxDepthGauge != nil {
+					if d := int64(len(rtpCh)); d > 0 {
+						for {
+							old := rxDepthGauge.Load()
+							if d <= old || rxDepthGauge.CompareAndSwap(old, d) {
+								break
+							}
+						}
+					}
+				}
 			case <-ctx.Done():
 				pktPoolPut(pkt)
 				return

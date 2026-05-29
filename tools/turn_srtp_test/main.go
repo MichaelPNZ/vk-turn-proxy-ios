@@ -297,7 +297,7 @@ func runWorker(ctx context.Context, cred backupCred, relayAddr string, dst *net.
 
 	// Perform DTLS+SRTP handshake on top of the relayed conn.
 	hsCtx, hsCancel := context.WithTimeout(ctx, srtpwrap.HandshakeTimeout)
-	srtpConn, err := srtpwrap.Client(hsCtx, relayedConn, dst)
+	srtpConn, err := srtpwrap.Client(hsCtx, relayedConn, dst, nil)
 	hsCancel()
 	if err != nil {
 		ws.hsErr.Store(err)

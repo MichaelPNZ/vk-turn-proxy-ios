@@ -128,6 +128,15 @@ type Proxy struct {
 	sendCh chan []byte
 	recvCh chan []byte
 
+	// rtpChPeak (build 145, diagnostic): per-interval high-water mark of the
+	// plain DTLS+SRTP path's per-conn rtpCh depth, updated at the demux
+	// producer (srtpwrap.runDemuxFromPacketConn) and read-and-reset each
+	// memstats tick. Tests whether rtpCh (cap 4096 × 2048B = up to 8 MB/conn)
+	// fills under RX-burst backpressure and accounts for the phys_footprint
+	// climb to the 50 MB jetsam ceiling. Stays 0 on WRAP/legacy paths (they
+	// don't use srtpwrap). Must run in plain-SRTP mode to exercise it.
+	rtpChPeak atomic.Int64
+
 	wg sync.WaitGroup
 
 	started atomic.Bool
@@ -1775,14 +1784,6 @@ func (p *Proxy) runConnection(sessCtx context.Context, linkID string, readyCh ch
 			if errors.As(err, &captchaErr) {
 				log.Printf("proxy: session ended with captcha requirement, not counting as failure")
 				shortFailures = 0
-			} else if errors.Is(err, errShapedAllocation) {
-				// Shape detection is an EXPECTED outcome for ~17% of
-				// allocations (VK randomly caps per-allocation at
-				// ~9 KB/s). The cred itself is fine — a fresh
-				// allocation on the same cred has a fresh ~83% chance
-				// of being full-speed. Don't penalize with dormancy:
-				// retry immediately on the same cred.
-				shortFailures = 0
 			} else if duration > 5*time.Minute {
 				shortFailures = 0 // session was healthy
 			} else {
@@ -2118,21 +2119,6 @@ func (p *Proxy) runDTLSSession(sessCtx context.Context, linkID string, readyCh c
 	// killed immediately on its first probe tick.
 	if connIdx >= 0 && connIdx < len(p.lastPongTimes) {
 		p.lastPongTimes[connIdx].Store(time.Now().Unix())
-	}
-
-	// Shape-detection burst (build 110): VK randomly caps ~17% of
-	// allocations at ~9 KB/s. Send a quick burst of 50×1280-byte probes
-	// (~42 KB/s) over ~1.5s, count echoes, classify the conn. If shaped
-	// → return errShapedAllocation, runConnection retries on same cred
-	// without penalty (the failure is expected for ~17% of allocations,
-	// not a network problem). DTLS handshake already filtered out the
-	// other major failure mode (blackhole conns time out at handshake
-	// in 15s before reaching this point).
-	if err := p.probeForShapingDTLS(connCtx, dtlsConn, connIdx); err != nil {
-		// If errShapedAllocation, runConnection will skip shortFailures
-		// and retry immediately on the same cred. Other errors (ctx
-		// cancel, conn-broken) flow through normal handling.
-		return err
 	}
 
 	// Liveness-probe sender. Periodically writes a sentinel packet
@@ -2875,15 +2861,30 @@ func (p *Proxy) runTURN(ctx context.Context, turnAddr string, creds *TURNCreds, 
 
 	var peerAddr atomic.Value
 
-	// WRAP layer (see pkg/proxy/wrap.go): when enabled, every byte that
-	// crosses the conn2 ↔ relay boundary in this bridge is XOR'd with a
-	// ChaCha20 keystream so VK's TURN-relay payload classifier sees random
-	// bytes instead of a recognisable DTLS+WG signature. Both directions
-	// MUST be symmetric — a one-sided wrap means the DTLS state machine on
-	// the other end sees garbage and stalls. Server must be running with
-	// matching -wrap and -wrap-key (cacggghp/vk-turn-proxy WRAP-aware build).
+	// WRAP layer (see pkg/proxy/wrap.go): when enabled, every UDP datagram
+	// that crosses the conn2 ↔ relay boundary is wrapped in an SRTP-shaped
+	// envelope (RTP header + explicit nonce + ChaCha20-Poly1305 AEAD
+	// ciphertext + tag) so VK's TURN-relay payload classifier matches it
+	// as RTP media and forwards it on the fast path instead of shaping /
+	// blackholing on a DTLS+WG signature. Both directions MUST run the
+	// matching cipher — server must be invoked with -wrap-srtp + -wrap-key.
+	//
+	// Per-conn cipher state (seq, ts, SSRC, sessionID, counter) lives in
+	// the wrapConn. We create ONE wrapConn per runTURN invocation (i.e.
+	// per relayed PacketConn lifetime); both TX and RX goroutines share it
+	// via atomic increments — the AEAD object itself is thread-safe.
 	useWrap := p.config.UseWrap
-	wrapKey := p.config.WrapKey
+	var wc *wrapConn
+	if useWrap {
+		var werr error
+		// isServer=false: client side clears the direction MSB in
+		// sessionID/SSRC. Server sets it.
+		wc, werr = newWrapConn(p.config.WrapKey, false)
+		if werr != nil {
+			log.Printf("proxy: [conn %d] runTURN: wrap init failed: %v — disabling WRAP for this conn", connIdx, werr)
+			useWrap = false
+		}
+	}
 
 	// conn2 → relay
 	// No select{default} polling — context cancellation is handled via deadline
@@ -2892,6 +2893,13 @@ func (p *Proxy) runTURN(ctx context.Context, turnAddr string, creds *TURNCreds, 
 		defer wg.Done()
 		defer turnCancel()
 		buf := make([]byte, 1600)
+		// Per-goroutine TX wire buffer: reused across iterations so we
+		// don't allocate per-packet during the hot path. Sized for the
+		// worst-case payload + WRAP overhead.
+		var wireBuf []byte
+		if useWrap {
+			wireBuf = make([]byte, wrapMaxWire(1600))
+		}
 		for {
 			n, addr, err := conn2.ReadFrom(buf)
 			if err != nil {
@@ -2903,12 +2911,12 @@ func (p *Proxy) runTURN(ctx context.Context, turnAddr string, creds *TURNCreds, 
 			peerAddr.Store(addr)
 			out := buf[:n]
 			if useWrap {
-				wrapped, werr := wrapPacket(wrapKey, out)
+				wn, werr := wc.wrapInto(wireBuf, buf[:n])
 				if werr != nil {
 					log.Printf("proxy: [conn %d] runTURN conn2→relay: wrap error: %v", connIdx, werr)
 					return
 				}
-				out = wrapped
+				out = wireBuf[:wn]
 			}
 			if _, err = relayConn.WriteTo(out, p.peer); err != nil {
 				if ctx.Err() == nil {
@@ -2918,7 +2926,7 @@ func (p *Proxy) runTURN(ctx context.Context, turnAddr string, creds *TURNCreds, 
 			}
 			// Per-conn TX byte counter for diagnostic — count the
 			// pre-WRAP application-layer bytes (DTLS records that came
-			// out of conn2), not the wire bytes including nonce. This
+			// out of conn2), not the wire bytes including overhead. This
 			// matches what an external observer counting WireGuard
 			// throughput would see.
 			if connIdx >= 0 && connIdx < len(p.connTxBytes) {
@@ -2937,11 +2945,11 @@ func (p *Proxy) runTURN(ctx context.Context, turnAddr string, creds *TURNCreds, 
 		defer wg.Done()
 		defer turnCancel()
 		// Read into a slightly larger buffer when WRAP is on so we have
-		// room for the nonce prefix on top of the worst-case 1600-byte
-		// DTLS payload we forward to conn2.
+		// room for the 40-byte overhead (RTP+nonce+tag) on top of the
+		// worst-case 1600-byte DTLS payload we forward to conn2.
 		readBufLen := 1600
 		if useWrap {
-			readBufLen += wrapNonceLen
+			readBufLen += wrapOverhead
 		}
 		buf := make([]byte, readBufLen)
 		// Plaintext destination buffer for unwrap. Sized for the same
@@ -2957,7 +2965,7 @@ func (p *Proxy) runTURN(ctx context.Context, turnAddr string, creds *TURNCreds, 
 			}
 			payload := buf[:n]
 			if useWrap {
-				m, werr := unwrapPacket(wrapKey, buf[:n], plain)
+				m, werr := wc.unwrapPacket(buf[:n], plain)
 				if werr != nil {
 					log.Printf("proxy: [conn %d] runTURN relay→conn2: unwrap error: %v (n=%d)", connIdx, werr, n)
 					// Drop and continue rather than tearing down the TURN
@@ -3311,7 +3319,7 @@ func (p *Proxy) logMemStatsLoop(ctx context.Context) {
 		prevTxPkt = curTxPkt
 		prevRxPkt = curRxPkt
 
-		log.Printf("proxy: memstats %s rss=%s vm-internal=%s vm-external=%s vm-reusable=%s vm-compressed=%s sys=%s heap-alloc=%s heap-inuse=%s heap-idle=%s heap-released=%s stack=%s heap-objects=%d goroutines=%d numGC=%d tx-pkt=%d rx-pkt=%d",
+		log.Printf("proxy: memstats %s rss=%s vm-internal=%s vm-external=%s vm-reusable=%s vm-compressed=%s sys=%s heap-alloc=%s heap-inuse=%s heap-idle=%s heap-released=%s stack=%s heap-objects=%d goroutines=%d numGC=%d tx-pkt=%d rx-pkt=%d rtpch-peak=%d recvch=%d/%d",
 			label,
 			rssStr,
 			internalStr,
@@ -3328,7 +3336,10 @@ func (p *Proxy) logMemStatsLoop(ctx context.Context) {
 			runtime.NumGoroutine(),
 			ms.NumGC,
 			txPktDelta,
-			rxPktDelta)
+			rxPktDelta,
+			p.rtpChPeak.Swap(0),
+			len(p.recvCh),
+			cap(p.recvCh))
 
 		// Alloc-spike alert (build 140): if heap-alloc grew more than
 		// allocSpikeThreshold (5 MB) between ticks, emit a dedicated
@@ -3855,74 +3866,7 @@ func recvPktPoolPut(b []byte) {
 const (
 	probeInterval       = 30 * time.Second
 	probeStaleThreshold = 120 * time.Second
-
-	// Shape-probe burst: fires once per allocation right after DTLS+TURN
-	// session established to classify the allocation as shaped (~9 KB/s
-	// VK per-allocation cap) or full-speed.
-	//
-	// 2026-05-18/19 empirical (turn_bw_test sessions): VK's per-
-	// allocation random shaper caps ~17% of allocations at ~9 KB/s
-	// regardless of how much we send. The cap is chosen per-allocation
-	// by VK; reallocating on the same cred has a fresh ~17% chance of
-	// hitting it again.
-	//
-	// Burst parameters (variant b3, build 113+): 30 probes × 1280 bytes
-	// spread over 1.5s — REVERTED back to build 111 baseline after
-	// build 112's 5s burst also produced ~all SHAPED classifications.
-	//
-	// Cross-correlation with server-side probe-rx logs (build 112 +
-	// vpn.wifi.8 server log 2026-05-19) showed that the server received
-	// 45-57 probes / 100 in the 5s window = ~11-14 KB/s per conn, in a
-	// steady rate-limited stream (NOT bursty drops). Mac bw_test on the
-	// SAME relay+destination same day shows full-speed conns deliver
-	// 257 KB/s sustained, so VK's per-allocation shape cap hasn't moved.
-	//
-	// Conclusion: iOS NE TCP-control has its own per-conn outbound cap
-	// around 10-14 KB/s that we cannot exceed with any burst pattern
-	// shorter than steady-state. This is structurally too close to VK's
-	// 9 KB/s shape cap for the probe to reliably discriminate. Build
-	// 113 keeps the probe as DIAGNOSTIC ONLY — SHAPED classification is
-	// logged but the conn is kept alive (probe returns nil instead of
-	// errShapedAllocation). Actual shape detection will need a different
-	// approach (e.g. passive monitoring of per-conn user-traffic
-	// throughput during real steady-state, or wire-level pattern
-	// changes rather than rate-based).
-	//
-	// Backward compat: if the server doesn't echo (pre-PR#168 deploy)
-	// AND serverProbeable hasn't been set true by any other conn,
-	// pongsReceived=0 is treated as "server unreachable for probing,
-	// can't classify" — same handling as before.
-	//
-	// Build 114: длинный диагностический burst (30s) чтобы понять
-	// есть ли у iPhone NE TCP per-conn sustained cap. Mac bw_test на
-	// том же relay+dest выдаёт 257 KB/s sustained за 30s — наша probe
-	// burst на iPhone (build 112: 5s, build 113: 1.5s) даёт 11-14 KB/s
-	// server-rx. Вопрос: это структурный per-conn cap iOS NE или это
-	// TCP slow-start не успевает за 1-5s? 30-секундный burst даст
-	// ответ:
-	//   - Если server-rx подскочит до 500+/600 probes (= 21 KB/s+ к
-	//     серверу) — был slow-start, в sustained режиме всё хорошо
-	//   - Если останется ~150-200 probes / 30s (= 6-9 KB/s) — есть
-	//     реальный per-conn cap, копаем дальше где
-	// Killer всё ещё disabled (build 113) — это чисто диагностический
-	// прогон. Per-conn оценка теперь 30s+ вместо 2s — холодный старт
-	// 10 conn'ов станет очень медленным, но это ради измерения.
-	shapeProbeBurstCount    = 600
-	shapeProbeSpacing       = 50 * time.Millisecond // 600 × 50ms = 30s
-	shapeProbePacketSize    = 1280                  // bytes per probe (incl. magic+seq)
-	shapeProbeWindowAfter   = 5 * time.Second
-	shapeProbeRateThreshold = 12 * 1024 // bytes/s — below = shaped (DIAGNOSTIC label only, no kill)
 )
-
-// errShapedAllocation indicates that the just-established allocation
-// is shaped (~9 KB/s VK per-allocation cap detected via shape-probe
-// burst). The conn should be killed and reallocation attempted on the
-// SAME cred — the shape decision is VK-side per-allocation, so a
-// fresh allocation has ~83% chance of being full-speed. Distinct from
-// generic session errors so runConnection can skip the shortFailures
-// counter (shape detection completing in ~2s is the EXPECTED outcome
-// for ~17% of allocations, not a network problem).
-var errShapedAllocation = errors.New("shaped allocation detected by probe burst")
 
 // isProbePacket returns true if buf is a probe ping/pong sentinel.
 // Both directions use the same magic — server echoes the client's
@@ -3937,159 +3881,6 @@ func isProbePacket(buf []byte) bool {
 		}
 	}
 	return true
-}
-
-// probeForShapingDTLS runs the shape-detection burst right after DTLS+
-// TURN session is established. Returns nil if the conn is full-speed
-// (or if shaping cannot be determined for backward-compat reasons),
-// errShapedAllocation if the conn is shaped and should be killed for
-// reallocation.
-//
-// Called from runDTLSSession BEFORE the periodic probe goroutine and
-// before the send/recv user-traffic goroutines launch, so dtlsConn is
-// not yet being read concurrently. We do inline writes + inline reads
-// for the burst window, then return — the normal goroutines start
-// after.
-//
-// Backward compat: if 0 pongs come back AND serverProbeable is false
-// (no other conn has ever observed a pong either), we accept the conn.
-// On legacy servers without PR #168 probe-echo, shape detection is
-// silently disabled — same conn-quality distribution as pre-build-110.
-func (p *Proxy) probeForShapingDTLS(
-	connCtx context.Context,
-	dtlsConn net.Conn,
-	connIdx int,
-) error {
-	// Build probe template: magic + 8-byte seq slot + zero padding to
-	// shapeProbePacketSize. Server echoes verbatim.
-	probeTpl := make([]byte, shapeProbePacketSize)
-	copy(probeTpl[:len(probePingMagic)], probePingMagic)
-
-	burstStart := time.Now()
-	probesSent := 0
-	pongsReceived := 0
-
-	// Send goroutine: walks the burst, sleeps between sends. Closes
-	// sendDone when finished or aborted.
-	sendDone := make(chan struct{})
-	go func() {
-		defer close(sendDone)
-		for i := 0; i < shapeProbeBurstCount; i++ {
-			select {
-			case <-connCtx.Done():
-				return
-			default:
-			}
-			// High-bit prefix on the seq to disambiguate burst probes
-			// from the periodic probe goroutine's 1..N seqs (which
-			// won't fire until probeInterval=30s into the session, so
-			// they can't overlap our 2s burst — but the prefix makes
-			// log attribution unambiguous if a stray late-arrival
-			// pong shows up after burst ends).
-			binary.BigEndian.PutUint64(
-				probeTpl[len(probePingMagic):len(probePingMagic)+8],
-				(uint64(1)<<63)|uint64(i))
-			dtlsConn.SetWriteDeadline(time.Now().Add(2 * time.Second))
-			if _, err := dtlsConn.Write(probeTpl); err != nil {
-				return
-			}
-			probesSent++
-			time.Sleep(shapeProbeSpacing)
-		}
-	}()
-
-	// Read drain in the main goroutine: deadline-bounded reads in a
-	// loop, count pongs by isProbePacket, drop non-probe packets (user-
-	// traffic recv goroutine isn't running yet; WG hasn't started
-	// sending real data through this conn either).
-	burstEnd := burstStart.Add(
-		time.Duration(shapeProbeBurstCount)*shapeProbeSpacing +
-			shapeProbeWindowAfter)
-	rxBuf := make([]byte, 1600)
-	for {
-		now := time.Now()
-		if !now.Before(burstEnd) {
-			break
-		}
-		select {
-		case <-connCtx.Done():
-			return connCtx.Err()
-		default:
-		}
-		// Cap each Read deadline at 100ms (or remaining window if
-		// less) so we tick predictably and notice ctx cancel quickly.
-		readDeadline := now.Add(100 * time.Millisecond)
-		if readDeadline.After(burstEnd) {
-			readDeadline = burstEnd
-		}
-		dtlsConn.SetReadDeadline(readDeadline)
-		n, err := dtlsConn.Read(rxBuf)
-		if err != nil {
-			// Timeout is expected and harmless — just loop. Anything
-			// else means the conn is broken; bail out of the burst
-			// and let the surrounding session-establishment code path
-			// handle teardown.
-			if strings.Contains(err.Error(), "timeout") ||
-				strings.Contains(err.Error(), "deadline") {
-				continue
-			}
-			log.Printf("proxy: [conn %d] shape probe: read error after %d/%d sent: %v",
-				connIdx, probesSent, shapeProbeBurstCount, err)
-			break
-		}
-		if isProbePacket(rxBuf[:n]) {
-			pongsReceived++
-			p.serverProbeable.Store(true)
-			// NOTE: we deliberately don't touch lastPongTimes /
-			// lastPongSeq / firstPongAt here — those belong to the
-			// periodic-probe pipeline which hasn't started yet and
-			// will do its own bookkeeping on its first pong. The
-			// shape probe's own count is tracked locally in
-			// pongsReceived.
-		}
-		// Non-probe packets (e.g. early WG handshake from a stale peer
-		// state) are dropped on the floor — the recv goroutine for
-		// this conn hasn't started forwarding to recvCh yet, and WG
-		// can retransmit anything it cares about within seconds.
-	}
-
-	// Make sure send goroutine has fully drained before we classify
-	// (it usually has — burst duration equals burst end — but be
-	// defensive in case it stalled on a Write).
-	<-sendDone
-
-	burstDuration := time.Since(burstStart)
-	bytesReceived := uint64(pongsReceived) * uint64(shapeProbePacketSize)
-	actualRateBps := float64(bytesReceived) / burstDuration.Seconds()
-
-	// Backward-compat fallback: 0 pongs AND server has never produced
-	// a pong on ANY conn → server probably doesn't echo (pre-PR#168).
-	// Can't classify; accept the conn and let normal liveness handle.
-	if pongsReceived == 0 && !p.serverProbeable.Load() {
-		log.Printf("proxy: [conn %d] shape probe: server not probe-aware (0/%d pongs in %s), accepting conn",
-			connIdx, probesSent, burstDuration.Round(100*time.Millisecond))
-		return nil
-	}
-
-	if actualRateBps < float64(shapeProbeRateThreshold) {
-		// Build 113: killer DISABLED — log SHAPED for diagnostic only,
-		// keep conn alive. iOS NE TCP-control has its own per-conn
-		// outbound cap (~10-14 KB/s observed via server-rx counts in
-		// build 112 / 2026-05-19) that's structurally too close to VK
-		// shape cap 9 KB/s for the probe to discriminate reliably.
-		// Killing produced 100% false-positive on all live conns.
-		log.Printf("proxy: [conn %d] shape probe: SHAPED (got %d/%d pongs in %s = %.1f KB/s, threshold %d KB/s) — diagnostic only, killer disabled, conn kept",
-			connIdx, pongsReceived, probesSent,
-			burstDuration.Round(100*time.Millisecond),
-			actualRateBps/1024, shapeProbeRateThreshold/1024)
-		return nil
-	}
-
-	log.Printf("proxy: [conn %d] shape probe: OK (got %d/%d pongs in %s = %.1f KB/s)",
-		connIdx, pongsReceived, probesSent,
-		burstDuration.Round(100*time.Millisecond),
-		actualRateBps/1024)
-	return nil
 }
 
 // ─── SRTP transport (Config.UseSrtp=true) ─────────────────────────────────
@@ -4559,7 +4350,8 @@ func (p *Proxy) setupSRTPSession(ctx context.Context, turnAddr string, creds *TU
 		Password:               creds.Password,
 		Realm:                  "okcdn.ru",
 		Software:               "vk-turn-srtp",
-		LoggerFactory:          logging.NewDefaultLoggerFactory(),
+		// Custom factory (not pion's default LogLevelError) so SRTP-path TURN refresh/auth failures feed the silent-degradation watchdog + get sanitized, matching runTURN.
+		LoggerFactory:          &turnLoggerFactory{proxy: p, slot: credSlot},
 		RequestedAddressFamily: turn.RequestedAddressFamilyIPv4,
 	})
 	if err != nil {
@@ -4595,7 +4387,7 @@ func (p *Proxy) setupSRTPSession(ctx context.Context, turnAddr string, creds *TU
 		connIdx, relayConn.LocalAddr(), allocDur.Milliseconds(), ctlConn.LocalAddr())
 
 	hsCtx, hsCancel := context.WithTimeout(ctx, srtpwrap.HandshakeTimeout)
-	srtpConn, err := srtpwrap.Client(hsCtx, relayConn, p.peer)
+	srtpConn, err := srtpwrap.Client(hsCtx, relayConn, p.peer, &p.rtpChPeak)
 	hsCancel()
 	if err != nil {
 		_ = relayConn.Close()
