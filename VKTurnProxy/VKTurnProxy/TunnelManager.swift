@@ -1174,6 +1174,7 @@ class TunnelManager: ObservableObject {
             "peer_addr": config.peerAddress,
             "use_dtls": config.useDTLS,
             "use_udp": config.useUDP,
+            "force_legacy_captcha": config.forceLegacyCaptcha,
             "use_wrap": config.useWrap,
             "wrap_key_hex": config.wrapKeyHex,
             "use_srtp": config.useSrtp,
@@ -1489,6 +1490,11 @@ struct TunnelConfig {
     // Bonus: some ISP whitelists drop UDP entirely but pass TCP, so this
     // also helps for that class of restricted networks.
     var useUDP: Bool = false
+    // forceLegacyCaptcha: undocumented on-device captcha-test toggle (build
+    // 149) — skip the captcha-free VK Calls path so the legacy
+    // captchaNotRobot.* solver runs. Set via a `forceLegacyCaptcha` field in
+    // the backup JSON (no Settings UI). Default false → no production effect.
+    var forceLegacyCaptcha: Bool = false
     var numConnections: Int = 30 // configurable from Settings; VK allows ~10 simultaneous TURN allocations per cred set, so 30 conns spreads over ceil(N/10) = 3 cred sets plus a "+1 reserve" (4 total slots). 30 strikes a useful balance: enough parallelism for high-throughput single sessions, few enough to avoid overwhelming VK's per-IP rate-limit on cred refresh.
     // Per-slot cooldown after a failed fetch (typically captcha required).
     // Slot stays in cooldown for this long before being eligible to retry.

@@ -49,6 +49,7 @@ import (
 	neturl "net/url"
 	"os"
 	"strings"
+	"sync/atomic"
 
 	fhttp "github.com/bogdanfinn/fhttp"
 	"github.com/google/uuid"
@@ -69,18 +70,31 @@ const (
 	vkCallsAPIVersion = "5.276"
 )
 
+// forceLegacyCaptcha, when true, makes getVKCredsViaVKCallsPath skip the
+// captcha-free VK Calls path so GetVKCreds falls through to the legacy
+// captchaNotRobot.* solver. Used for ON-DEVICE testing of the captcha solver:
+// the free path is captcha-free, so the solver (header-order fix + slider)
+// never runs in normal use. On iOS it's driven by an undocumented
+// `forceLegacyCaptcha` field in the backup JSON, plumbed through ProxyConfig ->
+// wgStartVKBootstrap / wgTurnOnWithTURN -> SetForceLegacyCaptcha. Default false.
+var forceLegacyCaptcha atomic.Bool
+
+// SetForceLegacyCaptcha sets the force-legacy-captcha on-device test flag.
+func SetForceLegacyCaptcha(b bool) { forceLegacyCaptcha.Store(b) }
+
 // getVKCredsViaVKCallsPath fetches TURN credentials using VK Calls iOS app's
 // captcha-free flow. Returns CaptchaRequiredError if a captcha gate
 // unexpectedly appears (caller should fall back to legacy path then).
 // Returns generic error on any other failure (caller can also try legacy).
 func getVKCredsViaVKCallsPath(linkID string) (*TURNCreds, error) {
-	// Diagnostic escape hatch (standalone tools/captcha_test only): when
-	// VK_SKIP_VKCALLS=1 is set, skip the captcha-free path entirely so
-	// GetVKCreds falls through to the legacy captchaNotRobot.* solver —
-	// lets the Mac test always exercise a real captcha and observe what VK
-	// serves (slider vs checkbox). Unset in production iOS → no effect.
-	if os.Getenv("VK_SKIP_VKCALLS") == "1" {
-		return nil, fmt.Errorf("vkcalls skipped (VK_SKIP_VKCALLS=1)")
+	// Diagnostic escape hatch: skip the captcha-free path entirely so
+	// GetVKCreds falls through to the legacy captchaNotRobot.* solver — lets us
+	// exercise a real captcha + observe what VK serves (slider vs checkbox).
+	// Two triggers: VK_SKIP_VKCALLS=1 env (standalone tools/captcha_test on
+	// Mac), or SetForceLegacyCaptcha(true) (iOS, from the undocumented backup
+	// `forceLegacyCaptcha` field). Both default off → no effect in production.
+	if forceLegacyCaptcha.Load() || os.Getenv("VK_SKIP_VKCALLS") == "1" {
+		return nil, fmt.Errorf("vkcalls skipped (force legacy captcha for on-device test)")
 	}
 	deviceID := uuid.New().String()
 	name := generateName()

@@ -113,6 +113,7 @@ struct ContentView: View {
                                 wrapKeyHex: wrapKeyHex,
                                 useSrtp: useSrtp,
                                 useUDP: useUDP,
+                                forceLegacyCaptcha: UserDefaults.standard.bool(forKey: "forceLegacyCaptcha"),
                                 numConnections: numConnections,
                                 credPoolCooldownSeconds: credPoolCooldownSeconds
                             )

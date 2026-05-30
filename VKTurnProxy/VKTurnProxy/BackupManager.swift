@@ -233,6 +233,9 @@ enum BackupManager {
         if let v = s.useSrtp { d.set(v, forKey: "useSrtp") }
         // useUDP: same nil-preserves-default pattern.
         if let v = s.useUDP { d.set(v, forKey: "useUDP") }
+        // forceLegacyCaptcha: undocumented on-device captcha-test toggle
+        // (build 149) — same nil-preserves-default pattern.
+        if let v = s.forceLegacyCaptcha { d.set(v, forKey: "forceLegacyCaptcha") }
 
         SharedLogger.shared.log("[AppDebug] Backup: applied settings (numConnections=\(s.numConnections), cooldown=\(s.credPoolCooldownSeconds)s, useDTLS=\(s.useDTLS), useWrap=\(s.useWrap ?? false), useSrtp=\(s.useSrtp ?? false), useUDP=\(s.useUDP ?? false))")
 

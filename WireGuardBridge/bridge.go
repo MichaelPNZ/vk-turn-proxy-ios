@@ -185,6 +185,13 @@ type ProxyConfig struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	} `json:"seeded_turn,omitempty"`
+
+	// ForceLegacyCaptcha, when true, makes GetVKCreds skip the captcha-free VK
+	// Calls path so the legacy captchaNotRobot.* solver runs — for on-device
+	// testing of the captcha fix (the free path is captcha-free, so the solver
+	// never runs otherwise). Driven by an undocumented `forceLegacyCaptcha`
+	// backup-JSON field. Default false → no production effect.
+	ForceLegacyCaptcha bool `json:"force_legacy_captcha,omitempty"`
 }
 
 //export wgTurnOnWithTURN
@@ -212,6 +219,7 @@ func wgTurnOnWithTURN(settings *C.char, tunFd C.int32_t, proxyConfigJSON *C.char
 		log.Printf("wgTurnOnWithTURN: using %d pre-resolved VK host IPs from main app", len(pcfg.VKHostIPs))
 		proxy.SetVKHostIPs(pcfg.VKHostIPs)
 	}
+	proxy.SetForceLegacyCaptcha(pcfg.ForceLegacyCaptcha)
 
 	// Create proxy
 	wrapKey, wrapErr := decodeWrapKey(pcfg.UseWrap, pcfg.WrapKeyHex)
@@ -328,6 +336,7 @@ func wgStartVKBootstrap(proxyConfigJSON *C.char) C.int32_t {
 		log.Printf("wgStartVKBootstrap: using %d pre-resolved VK host IPs from main app", len(pcfg.VKHostIPs))
 		proxy.SetVKHostIPs(pcfg.VKHostIPs)
 	}
+	proxy.SetForceLegacyCaptcha(pcfg.ForceLegacyCaptcha)
 
 	// Seeded TURN creds from main app's pre-bootstrap captcha flow (optional).
 	var seededTURN *proxy.TURNCreds

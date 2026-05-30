@@ -99,6 +99,15 @@ struct AppSettings: Codable {
     /// slower. Optional for back-compat with backups exported before
     /// this build — nil leaves the AppStorage default (false / TCP).
     let useUDP: Bool?
+    /// UNDOCUMENTED on-device captcha-test toggle (build 149): when true the
+    /// extension skips the captcha-free VK Calls path so the legacy
+    /// captchaNotRobot.* solver runs — lets a tester exercise the captcha fix
+    /// (the free path is captcha-free, so the solver never runs otherwise).
+    /// Optional + default nil so normal backups omit it; a tester adds
+    /// `"forceLegacyCaptcha": true` to the backup JSON by hand. No Settings UI.
+    /// `var` (not `let`) so the synthesised Decodable actually decodes it — an
+    /// immutable property with an initial value is never decoded by Codable.
+    var forceLegacyCaptcha: Bool? = nil
 }
 
 // MARK: - 1-Click Connection Link
