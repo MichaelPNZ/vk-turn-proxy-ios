@@ -563,6 +563,38 @@ func newSessionClient() tls_client.HttpClient {
 	return GetSessionClient()
 }
 
+// newFreshSessionClient builds a NEW bogdanfinn HttpClient with a FRESH cookie
+// jar each call (NOT the GetSessionClient singleton), same Safari iOS 26 TLS
+// profile (or Chrome_146 in VK_DESKTOP_CHROME mode).
+//
+// The legacy cred fetch (creds.go getVKCredsWithClientID) uses ONE per fetch:
+// VK keys the legacy calls.getAnonymousToken anon-call token on the SESSION
+// COOKIE (remixstid), NOT on device_id — so reusing the shared singleton made
+// every fetch return the SAME token → all credpool slots shared ONE
+// 10-allocation TURN quota → 486 "Allocation Quota Reached" past ~10 conns
+// (the "stuck at 20/20" bug). Harness-proven 2026-05-31: shared jar → 1
+// identical token across fetches; fresh jar → distinct tokens. The free path
+// (creds_vkcalls.go) does NOT need this — its identity is the per-fetch
+// device-bound anonymous_token JWT, immune to the shared cookie.
+func newFreshSessionClient() tls_client.HttpClient {
+	var clientProfile profiles.ClientProfile
+	if desktopChromeProfile() != nil {
+		clientProfile = profiles.Chrome_146
+	} else {
+		clientProfile = customSafariIOS26Profile()
+	}
+	client, cerr := tls_client.NewHttpClient(tls_client.NewNoopLogger(),
+		tls_client.WithTimeoutSeconds(20),
+		tls_client.WithClientProfile(clientProfile),
+		tls_client.WithCookieJar(tls_client.NewCookieJar()),
+	)
+	if cerr != nil {
+		log.Printf("pow: ERROR creating fresh session client: %v — falling back to singleton", cerr)
+		return GetSessionClient()
+	}
+	return client
+}
+
 // newHTTPClient creates a fresh http.Client (no cookie jar) with Chrome TLS fingerprint.
 func newHTTPClient() *http.Client {
 	return &http.Client{
@@ -579,7 +611,7 @@ func newHTTPClient() *http.Client {
 // user — either from the API `captchaNotRobot.check` response or (when the
 // checkbox check is skipped) from the HTML page's window.init payload. The
 // caller (creds.go) uses it as a signal for retry/backoff decisions.
-func solveCaptchaPoW(ctx context.Context, redirectURI, captchaSID, userAgent string) (string, string, error) {
+func solveCaptchaPoW(ctx context.Context, client tls_client.HttpClient, redirectURI, captchaSID, userAgent string) (string, string, error) {
 	captchaPowProfile = profileForUA(userAgent)
 	if p := desktopChromeProfile(); p != nil {
 		// VK_DESKTOP_CHROME diagnostic: pin the entire identity to Chrome 146
@@ -608,8 +640,10 @@ func solveCaptchaPoW(ctx context.Context, redirectURI, captchaSID, userAgent str
 		return "", "", fmt.Errorf("no session_token in redirect_uri")
 	}
 
-	// Single HTTP client with cookie jar for the entire captcha session.
-	client := newSessionClient()
+	// The HTTP client (with its cookie jar) is passed in by the caller so the
+	// captcha session shares cookies with the getAnonymousToken request that
+	// issued this captcha. The legacy cred fetch passes a FRESH per-fetch client
+	// (newFreshSessionClient) so each fetch is a distinct VK session.
 	// (bogdanfinn HttpClient has no CloseIdleConnections; profile pool is reused via package-level state)
 
 	// Random initial delay (1.5-2.5s) — HAR timing from real browser

@@ -334,8 +334,37 @@ func getVKCredsWithClientID(linkID string, vc vkCredentials, captchaSolver Captc
 	escapedName := neturl.QueryEscape(name)
 	log.Printf("vk: identity — name: %s, UA: %s (Phase 10 session-unified)", name, ua)
 
+	// Per-fetch device_id. VK keys the anonymous call participant on
+	// (device_id, link) — proven by the harness MINT TEST (2026-05-31): an
+	// EMPTY device_id (our old behavior) made VK return the SAME anon token for
+	// every fetch of a given client_id, so ALL credpool slots shared ONE
+	// 10-allocation quota → 486 "Allocation Quota Reached" on every conn past
+	// the first ~10 (the "stuck at 20/20" bug). A fresh UUID per fetch mints a
+	// DISTINCT anon participant → distinct TURN cred → its own 10-quota, exactly
+	// like the free path (creds_vkcalls.go threads device_id the same way).
+	// Threaded into every VK-side call below (get_anonym_token, getCallPreview,
+	// and all calls.getAnonymousToken variants). NOT the OK.ru anonymLogin
+	// device_id (step 3 below) — that's a separate identity with its own uuid.
+	//
+	// On an external WebView captcha retry (solvedCaptchaSID set) this generates
+	// a fresh device_id that won't match the success_token's original request;
+	// VK rejects the stale token and the internal PoW loop re-solves a fresh
+	// captcha against THIS device_id, so the fetch self-reconciles.
+	deviceID := uuid.New().String()
+
+	// Fresh HTTP client (fresh cookie jar) per fetch — the ACTUAL cure for the
+	// 20/20 cap. VK keys the legacy calls.getAnonymousToken anon token on the
+	// SESSION COOKIE (remixstid), not device_id; reusing the shared
+	// GetSessionClient made every fetch return the SAME token → all credpool
+	// slots shared ONE 10-allocation TURN quota → 486 past ~10 conns. A fresh
+	// session per fetch = a distinct VK identity = a distinct cred with its own
+	// quota (harness-proven 2026-05-31: shared jar → 1 token, fresh jar →
+	// distinct). Used in doRequest below AND passed to solveCaptchaPoW so the
+	// captcha is solved in the SAME session that issued it.
+	fetchClient := newFreshSessionClient()
+
 	doRequest := func(data string, url string) (resp map[string]interface{}, err error) {
-		client := GetSessionClient() // Phase 10: shared singleton with captcha solver
+		client := fetchClient // fresh per-fetch session (see fetchClient above) — NOT the shared singleton
 		// fhttp.NewRequest (NOT std http.NewRequest) — bogdanfinn HttpClient
 		// only accepts fhttp.Request. fhttp is bogdanfinn's fork of net/http
 		// that integrates with their HTTP/2 implementation.
@@ -405,7 +434,7 @@ func getVKCredsWithClientID(linkID string, vc vkCredentials, captchaSolver Captc
 		token1 = savedToken1
 		log.Printf("vk: reusing saved token1 for captcha retry")
 	} else {
-		data := fmt.Sprintf("client_id=%s&token_type=messages&client_secret=%s&version=1&app_id=%s", vc.ClientID, vc.ClientSecret, vc.ClientID)
+		data := fmt.Sprintf("client_id=%s&token_type=messages&client_secret=%s&version=1&app_id=%s&device_id=%s", vc.ClientID, vc.ClientSecret, vc.ClientID, deviceID)
 		resp, err := doRequest(data, "https://login.vk.ru/?act=get_anonym_token")
 		if err != nil {
 			return nil, fmt.Errorf("step1: %w", err)
@@ -417,20 +446,20 @@ func getVKCredsWithClientID(linkID string, vc vkCredentials, captchaSolver Captc
 	}
 
 	// Step 1.5: call getCallPreview (warms up the session, as in reference impl)
-	previewData := fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&access_token=%s", linkID, token1)
+	previewData := fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&access_token=%s&device_id=%s", linkID, token1, deviceID)
 	_, _ = doRequest(previewData, fmt.Sprintf("https://%s/method/calls.getCallPreview?v=5.275&client_id=%s", vkAPIHost(), vc.ClientID))
 
 	// Step 2: get anonymous call token (with captcha retry)
 	var token2 string
 	var resp map[string]interface{}
 	var err error
-	step2Data := fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&name=%s&access_token=%s", linkID, escapedName, token1)
+	step2Data := fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&name=%s&access_token=%s&device_id=%s", linkID, escapedName, token1, deviceID)
 
 	// If we have a pre-solved captcha (success_token from captchaNotRobot.check), include it.
 	if solvedCaptchaSID != "" && solvedCaptchaKey != "" {
 		log.Printf("vk: retrying step2 with success_token (%d chars), captcha_sid=%s", len(solvedCaptchaKey), solvedCaptchaSID)
-		step2Data = fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&name=%s&access_token=%s&captcha_key=&captcha_sid=%s&is_sound_captcha=0&success_token=%s&captcha_ts=%.3f&captcha_attempt=%d",
-			linkID, escapedName, token1, solvedCaptchaSID, neturl.QueryEscape(solvedCaptchaKey), solvedCaptchaTs, int(solvedCaptchaAttempt))
+		step2Data = fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&name=%s&access_token=%s&captcha_key=&captcha_sid=%s&is_sound_captcha=0&success_token=%s&captcha_ts=%.3f&captcha_attempt=%d&device_id=%s",
+			linkID, escapedName, token1, solvedCaptchaSID, neturl.QueryEscape(solvedCaptchaKey), solvedCaptchaTs, int(solvedCaptchaAttempt), deviceID)
 	}
 
 	for attempt := 0; attempt < 3; attempt++ {
@@ -470,14 +499,14 @@ func getVKCredsWithClientID(linkID string, vc vkCredentials, captchaSolver Captc
 			for powTry := 1; powTry <= maxPoWRetries; powTry++ {
 				log.Printf("vk: PoW attempt %d/%d", powTry, maxPoWRetries)
 				powCtx, powCancel := context.WithTimeout(context.Background(), 30*time.Second)
-				powToken, showType, powErr := solveCaptchaPoW(powCtx, currentImg, currentSID, ua)
+				powToken, showType, powErr := solveCaptchaPoW(powCtx, fetchClient, currentImg, currentSID, ua)
 				powCancel()
 				lastPowErr = powErr
 
 				if powErr == nil && powToken != "" {
 					log.Printf("vk: PoW auto-solve succeeded on attempt %d (%d chars), retrying step2", powTry, len(powToken))
-					step2Data = fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&name=%s&access_token=%s&captcha_key=&captcha_sid=%s&is_sound_captcha=0&success_token=%s&captcha_ts=%.3f&captcha_attempt=%d",
-						linkID, escapedName, token1, currentSID, neturl.QueryEscape(powToken), currentTs, int(currentAttempt))
+					step2Data = fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&name=%s&access_token=%s&captcha_key=&captcha_sid=%s&is_sound_captcha=0&success_token=%s&captcha_ts=%.3f&captcha_attempt=%d&device_id=%s",
+						linkID, escapedName, token1, currentSID, neturl.QueryEscape(powToken), currentTs, int(currentAttempt), deviceID)
 					powSolved = true
 					break
 				}
@@ -499,7 +528,7 @@ func getVKCredsWithClientID(linkID string, vc vkCredentials, captchaSolver Captc
 				}
 
 				if powTry < maxPoWRetries {
-					freshData := fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&name=%s&access_token=%s", linkID, escapedName, token1)
+					freshData := fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&name=%s&access_token=%s&device_id=%s", linkID, escapedName, token1, deviceID)
 					freshResp, freshErr := doRequest(freshData, step2URL)
 					if freshErr != nil {
 						log.Printf("vk: failed to get fresh captcha for PoW retry: %v", freshErr)
@@ -550,7 +579,7 @@ func getVKCredsWithClientID(linkID string, vc vkCredentials, captchaSolver Captc
 			// anti-bot tooling (sandbox iframe pure fetch check) but it's
 			// for analytics instrumentation, not bot blocking. The actual
 			// issue is purely session_token consumption.
-			freshData := fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&name=%s&access_token=%s", linkID, escapedName, token1)
+			freshData := fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&name=%s&access_token=%s&device_id=%s", linkID, escapedName, token1, deviceID)
 			if freshResp, freshErr := doRequest(freshData, step2URL); freshErr == nil {
 				if fSID, fImg, fTs, fAttempt := extractCaptcha(freshResp); fSID != "" {
 					log.Printf("vk: fetched untouched captcha for caller (was sid=%s, now sid=%s)", currentSID, fSID)
@@ -579,8 +608,8 @@ func getVKCredsWithClientID(linkID string, vc vkCredentials, captchaSolver Captc
 				return nil, fmt.Errorf("step2: captcha solver: %w", err)
 			}
 			log.Printf("vk: WebView captcha solver returned answer (%d chars), retrying", len(answer))
-			step2Data = fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&name=%s&access_token=%s&captcha_key=&captcha_sid=%s&is_sound_captcha=0&success_token=%s&captcha_ts=%.3f&captcha_attempt=%d",
-				linkID, escapedName, token1, currentSID, neturl.QueryEscape(answer), currentTs, int(currentAttempt))
+			step2Data = fmt.Sprintf("vk_join_link=https://vk.com/call/join/%s&name=%s&access_token=%s&captcha_key=&captcha_sid=%s&is_sound_captcha=0&success_token=%s&captcha_ts=%.3f&captcha_attempt=%d&device_id=%s",
+				linkID, escapedName, token1, currentSID, neturl.QueryEscape(answer), currentTs, int(currentAttempt), deviceID)
 			continue
 		}
 
