@@ -290,7 +290,7 @@ enum ServerMode: Int, CaseIterable, Identifiable {
         case .legacy: return "Legacy (DTLS+WG)"
         case .srtp: return "SRTP"
         case .srtpWrap: return "SRTP+WRAP"
-        case .srtpWrapA: return "SRTP-WRAP-A (amurcanov)"
+        case .srtpWrapA: return "SRTP-WRAP-A"
         }
     }
 }
@@ -486,7 +486,7 @@ struct SettingsView: View {
                 // A wrong/empty password surfaces as a clean GETCONF
                 // DENIED / DTLS handshake failure in the logs.
                 if serverModeBinding.wrappedValue == .srtpWrapA {
-                    SecureField("Password (amurcanov server)", text: $wrapAPassword)
+                    SecureField("Server password", text: $wrapAPassword)
                         .autocapitalization(.none)
                         .disableAutocorrection(true)
                     if wrapAPassword.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
