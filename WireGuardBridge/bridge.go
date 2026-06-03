@@ -192,6 +192,21 @@ type ProxyConfig struct {
 	// never runs otherwise). Driven by an undocumented `forceLegacyCaptcha`
 	// backup-JSON field. Default false → no production effect.
 	ForceLegacyCaptcha bool `json:"force_legacy_captcha,omitempty"`
+
+	// UseWrapA enables the "SRTP-WRAP-A" 4th transport mode — wire-compatible
+	// with amurcanov's proxy-turn-vk-android server (see proxy.Config.UseWrapA
+	// + pkg/proxy/wrapa.go + getconf.go). The server provisions WireGuard via
+	// GETCONF, so the user enters NO WG keys — only the server address +
+	// WrapAPassword. Mutually exclusive with use_srtp / use_dtls. After
+	// bootstrap, call wgWaitWrapAProvision to fetch the minted WG config.
+	UseWrapA bool `json:"use_wrap_a,omitempty"`
+	// WrapAPassword is the shared secret: HKDF input for the obfuscation key
+	// AND GETCONF authentication. Required when use_wrap_a is true.
+	WrapAPassword string `json:"wrap_a_password,omitempty"`
+	// DeviceID is the stable per-install identifier sent in GETCONF (the
+	// server keys the minted WG device on it). The app should persist one in
+	// the App Group; if empty, the proxy generates a per-session UUID.
+	DeviceID string `json:"device_id,omitempty"`
 }
 
 //export wgTurnOnWithTURN
@@ -237,6 +252,9 @@ func wgTurnOnWithTURN(settings *C.char, tunFd C.int32_t, proxyConfigJSON *C.char
 		UseWrap:          pcfg.UseWrap,
 		WrapKey:          wrapKey,
 		UseSrtp:          pcfg.UseSrtp,
+		UseWrapA:         pcfg.UseWrapA,
+		WrapAPassword:    pcfg.WrapAPassword,
+		DeviceID:         pcfg.DeviceID,
 		NumConns:         pcfg.NumConns,
 		CredPoolCooldown: time.Duration(pcfg.CredPoolCooldownSeconds) * time.Second,
 	})
@@ -373,6 +391,9 @@ func wgStartVKBootstrap(proxyConfigJSON *C.char) C.int32_t {
 		UseWrap:          pcfg.UseWrap,
 		WrapKey:          wrapKey,
 		UseSrtp:          pcfg.UseSrtp,
+		UseWrapA:         pcfg.UseWrapA,
+		WrapAPassword:    pcfg.WrapAPassword,
+		DeviceID:         pcfg.DeviceID,
 		NumConns:         pcfg.NumConns,
 		CredPoolCooldown: time.Duration(pcfg.CredPoolCooldownSeconds) * time.Second,
 		SeededTURN:       seededTURN,
@@ -631,6 +652,62 @@ func wgGetTURNServerIP(tunnelHandle C.int32_t) *C.char {
 		return C.CString("")
 	}
 	return C.CString(entry.proxy.TURNServerIP())
+}
+
+//export wgWaitWrapAProvision
+//
+// For the SRTP-WRAP-A mode (use_wrap_a=true): blocks up to timeoutMs for the
+// server to mint our WireGuard config via GETCONF over the WRAP-A transport,
+// then returns it as JSON:
+//
+//	{"private_key_hex","peer_public_key_hex","address","dns","mtu",
+//	 "keepalive_sec","uapi"}
+//
+// where "uapi" is the ready-to-IpcSet WireGuard config (server-minted keys +
+// a fake loopback endpoint our turnbind ignores). The Swift side uses
+// address/dns/mtu to build the NEPacketTunnelNetworkSettings and passes "uapi"
+// to wgAttachWireGuard. Returns "" on timeout / error / when the tunnel is not
+// in WRAP-A mode. Call this AFTER wgWaitBootstrapReady returns 1.
+func wgWaitWrapAProvision(tunnelHandle C.int32_t, timeoutMs C.int32_t) *C.char {
+	id := int32(tunnelHandle)
+	tunnelsMu.Lock()
+	entry, ok := tunnels[id]
+	tunnelsMu.Unlock()
+	if !ok {
+		log.Printf("wgWaitWrapAProvision: tunnel %d not found", id)
+		return C.CString("")
+	}
+
+	timeout := time.Duration(int64(timeoutMs)) * time.Millisecond
+	prov, err := entry.proxy.WaitWrapAProvision(timeout)
+	if err != nil {
+		log.Printf("wgWaitWrapAProvision: tunnel %d: %v", id, err)
+		return C.CString("")
+	}
+
+	out := struct {
+		PrivateKeyHex    string `json:"private_key_hex"`
+		PeerPublicKeyHex string `json:"peer_public_key_hex"`
+		Address          string `json:"address"`
+		DNS              string `json:"dns"`
+		MTU              int    `json:"mtu"`
+		KeepaliveSec     int    `json:"keepalive_sec"`
+		UAPI             string `json:"uapi"`
+	}{
+		PrivateKeyHex:    prov.PrivateKeyHex,
+		PeerPublicKeyHex: prov.PeerPublicKeyHex,
+		Address:          prov.Address,
+		DNS:              prov.DNS,
+		MTU:              prov.MTU,
+		KeepaliveSec:     prov.KeepaliveSec,
+		UAPI:             prov.UAPIConfig(),
+	}
+	data, err := json.Marshal(out)
+	if err != nil {
+		log.Printf("wgWaitWrapAProvision: tunnel %d marshal: %v", id, err)
+		return C.CString("")
+	}
+	return C.CString(string(data))
 }
 
 //export wgGetStats

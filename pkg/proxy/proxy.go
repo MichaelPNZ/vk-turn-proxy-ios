@@ -22,6 +22,7 @@ import (
 	fhttp "github.com/bogdanfinn/fhttp"
 	tls_client "github.com/bogdanfinn/tls-client"
 	"github.com/cbeuw/connutil"
+	"github.com/google/uuid"
 	"github.com/pion/dtls/v3"
 	"github.com/pion/dtls/v3/pkg/crypto/selfsign"
 	"github.com/pion/logging"
@@ -95,6 +96,27 @@ type Config struct {
 	// linear scaling across creds — 30-conn production layout delivers
 	// ~50 Mbps total (vs ~2 Mbps for the DTLS+WG baseline shape).
 	UseSrtp bool
+
+	// UseWrapA enables the "SRTP-WRAP-A" 4th transport mode, wire-compatible
+	// with amurcanov's proxy-turn-vk-android server (Android-only client; our
+	// iOS users keep asking how to reach it). Stack: UDP/VK-TURN → WRAP-A
+	// RTP-obfs (see wrapa.go) → plain DTLS (amurcanov's config) → GETCONF
+	// auto-provisioning + WireGuard. Despite the name it is NOT SRTP. The
+	// server mints our WireGuard keypair + IP via GETCONF (see getconf.go),
+	// so the user enters NO WG keys — only the server address + password.
+	// Mutually exclusive with UseSrtp/UseDTLS; selected first in the
+	// runConnection dispatch.
+	UseWrapA bool
+	// WrapAPassword is the shared secret for WRAP-A. Dual-purpose: HKDF input
+	// for the obfuscation key (deriveWrapAKey) AND GETCONF authentication.
+	// One UI field. Required when UseWrapA is true.
+	WrapAPassword string
+	// DeviceID is the stable per-install identifier sent in GETCONF. The
+	// server keys the minted WireGuard device on it, so it must be constant
+	// across all conns of a tunnel (and ideally across launches — the bridge
+	// generates+persists one). Empty → NewProxy generates a random UUID for
+	// this session.
+	DeviceID string
 }
 
 // Stats holds live tunnel statistics.
@@ -136,6 +158,17 @@ type Proxy struct {
 	// climb to the 50 MB jetsam ceiling. Stays 0 on WRAP/legacy paths (they
 	// don't use srtpwrap). Must run in plain-SRTP mode to exercise it.
 	rtpChPeak atomic.Int64
+
+	// WRAP-A (amurcanov-compatible) transport state. wrapAKey is the derived
+	// HKDF obfuscation key (nil unless UseWrapA). The provision is the
+	// server-minted WireGuard config from GETCONF, populated exactly once by
+	// the first runWrapASession (wrapAProvOnce) and broadcast to waiters
+	// (bridge → Swift) by closing wrapAProvCh. wrapAProvCh is nil unless
+	// UseWrapA.
+	wrapAKey      []byte
+	wrapAProvOnce sync.Once
+	wrapAProv     atomic.Pointer[WrapAProvision]
+	wrapAProvCh   chan struct{}
 
 	wg sync.WaitGroup
 
@@ -372,6 +405,27 @@ func NewProxy(cfg Config) *Proxy {
 			log.Printf("proxy: WRAP layer enabled (server must run with matching -wrap and -wrap-key)")
 		}
 	}
+	// WRAP-A (amurcanov-compatible) transport: derive the obfuscation key
+	// from the password up front and ensure a stable deviceID. Disable the
+	// mode (rather than fail) on bad input so the operator sees a clear log
+	// line instead of a confusing DTLS handshake timeout.
+	var wrapAKey []byte
+	if cfg.UseWrapA {
+		if cfg.WrapAPassword == "" {
+			log.Printf("proxy: WARN UseWrapA=true but WrapAPassword is empty — disabling WRAP-A")
+			cfg.UseWrapA = false
+		} else if key, err := deriveWrapAKey(cfg.WrapAPassword); err != nil {
+			log.Printf("proxy: WARN WRAP-A key derivation failed: %v — disabling WRAP-A", err)
+			cfg.UseWrapA = false
+		} else {
+			wrapAKey = key
+			if cfg.DeviceID == "" {
+				cfg.DeviceID = uuid.New().String()
+				log.Printf("proxy: WRAP-A generated session deviceID %s (bridge should persist a stable one)", cfg.DeviceID)
+			}
+			log.Printf("proxy: WRAP-A (amurcanov-compatible) mode enabled — server provisions WireGuard via GETCONF")
+		}
+	}
 	// Fresh global session — clear any leftover pion-degradation counters.
 	// (atomic.Int64 zero values are fine for a brand-new struct, but explicit
 	//  for clarity in case Proxy is ever pooled in the future.)
@@ -400,6 +454,11 @@ func NewProxy(cfg Config) *Proxy {
 		connLocalIPs:      make([]atomic.Value, cfg.NumConns),
 		wakeCh:            make(chan struct{}),
 		startedAt:         time.Now(),
+	}
+	// Wire up WRAP-A state on the constructed proxy (key + provision channel).
+	if cfg.UseWrapA {
+		p.wrapAKey = wrapAKey
+		p.wrapAProvCh = make(chan struct{})
 	}
 	// If no external solver provided, use the built-in channel-based solver
 	// that waits for SolveCaptcha() to be called (e.g. from iOS UI).
@@ -1764,6 +1823,8 @@ func (p *Proxy) runConnection(sessCtx context.Context, linkID string, readyCh ch
 		start := time.Now()
 		var err error
 		switch {
+		case p.config.UseWrapA:
+			err = p.runWrapASession(sessCtx, linkID, readyCh, &signaled, connIdx)
 		case p.config.UseSrtp:
 			err = p.runSRTPSession(sessCtx, linkID, readyCh, &signaled, connIdx)
 		case p.config.UseDTLS:
@@ -2728,6 +2789,295 @@ func (p *Proxy) runDirectSession(sessCtx context.Context, linkID string, readyCh
 
 	wg.Wait()
 	return nil
+}
+
+// ─── WRAP-A transport (Config.UseWrapA=true) ───────────────────────────────
+//
+// runWrapASession is the fourth dispatch target (alongside runDTLSSession /
+// runSRTPSession / runDirectSession), selected via Config.UseWrapA. It speaks
+// amurcanov's proxy-turn-vk-android wire protocol so our iOS client can reach
+// his Android-only server:
+//
+//	VK-TURN relay → WRAP-A RTP-obfs (wrapa.go) → plain DTLS (his config) →
+//	GETCONF auto-provisioning (getconf.go) → WireGuard
+//
+// It reuses runTURN for the relay (all the cred / quota / keepalive /
+// reconnect machinery) by inserting the WRAP-A obfuscation as a
+// net.PacketConn wrapper around conn1 — exactly as tools/wrapa_test layered
+// DTLS over the UDP socket, proven end-to-end against the live server
+// 2026-06-03. Every conn sends GETCONF as its mandatory first message; the
+// first to finish stores the server-minted WireGuard config
+// (storeWrapAProvision) and the bridge waits on it (WaitWrapAProvision) to
+// configure the WG device. MVP, like runSRTPSession — no liveness-probe
+// sender / zombie watchdog (amurcanov's server has no probe-echo); self-
+// healing rides the global no-RX watchdog + the per-conn read-deadline
+// staleness check below.
+func (p *Proxy) runWrapASession(sessCtx context.Context, linkID string, readyCh chan<- struct{}, signaled *bool, connIdx int) error {
+	_ = linkID // reserved for per-link logging parity with the DTLS path
+	connCtx, connCancel := context.WithCancel(sessCtx)
+	defer connCancel()
+
+	conn1, conn2 := connutil.AsyncPacketPipe()
+	defer conn1.Close()
+	defer conn2.Close()
+
+	turnAddr, creds, credSlot, err := p.resolveTURNAddr(connIdx, false)
+	if err != nil {
+		return err
+	}
+	currentSlot := credSlot
+	defer func() { p.credPool.release(currentSlot) }()
+
+	// TURN relay underneath (conn2 ↔ VK relay). Same spawn pattern as
+	// runDTLSSession: any TURN exit cancels the conn so the outer loop
+	// rebuilds it.
+	spawnTURN := func(addr string, c *TURNCreds) chan error {
+		ch := make(chan error, 1)
+		go func() {
+			terr := p.runTURN(connCtx, addr, c, conn2, connIdx, credSlot)
+			ch <- terr
+			connCancel()
+		}()
+		return ch
+	}
+	turnDone := spawnTURN(turnAddr, creds)
+
+	// WRAP-A obfuscation around the DTLS-transport end of the pipe, then a
+	// plain DTLS client with amurcanov's exact config.
+	wrapAPC, err := newWrapAPacketConn(conn1, p.peer, p.wrapAKey)
+	if err != nil {
+		return fmt.Errorf("WRAP-A init: %w", err)
+	}
+	dtlsStart := time.Now()
+	dtlsConn, err := dialDTLSWrapA(connCtx, wrapAPC, p.peer)
+	if err != nil {
+		connCancel()
+		select {
+		case turnErr := <-turnDone:
+			if turnErr != nil {
+				// Mirror runDTLSSession's error attribution so quota / auth
+				// failures land on the slot that actually carried the cred.
+				if isQuotaError(turnErr) {
+					cooldown := p.credPool.markSaturated(credSlot)
+					log.Printf("proxy: [conn %d] WRAP-A TURN allocate quota error (486) on slot %d (cooldown %s)",
+						connIdx, credSlot, cooldown.Round(time.Second))
+				} else if isAuthError(turnErr) {
+					p.credPool.invalidateEntry(credSlot)
+					log.Printf("proxy: [conn %d] WRAP-A bootstrap auth error on slot %d, invalidated", connIdx, credSlot)
+				}
+				return fmt.Errorf("WRAP-A DTLS failed: %w (TURN error: %v)", err, turnErr)
+			}
+		default:
+		}
+		return fmt.Errorf("WRAP-A DTLS: %w", err)
+	}
+	defer dtlsConn.Close()
+	context.AfterFunc(connCtx, func() { dtlsConn.Close() })
+
+	// GETCONF — MANDATORY first message on every conn (the server sniffs the
+	// first datagram). Idempotent per deviceID; the first to finish provisions
+	// the WG device. Done synchronously BEFORE the recv pump so the response
+	// isn't eaten by the WireGuard read goroutine.
+	prov, err := doGetconf(dtlsConn, p.config.DeviceID, p.config.WrapAPassword)
+	if err != nil {
+		return fmt.Errorf("WRAP-A getconf: %w", err)
+	}
+	p.storeWrapAProvision(prov)
+
+	p.dtlsHSns.Store(int64(time.Since(dtlsStart)))
+	p.activeConns.Add(1)
+	p.totalConns.Add(1)
+	defer p.activeConns.Add(-1)
+
+	if readyCh != nil && !*signaled {
+		select {
+		case readyCh <- struct{}{}:
+		default:
+		}
+	}
+	*signaled = true
+	p.signalBootstrapDone(nil)
+
+	log.Printf("proxy: [conn %d, cred %d] WRAP-A+TURN session established (getconf ok)", connIdx, credSlot)
+
+	if connIdx >= 0 && connIdx < len(p.lastPongTimes) {
+		p.lastPongTimes[connIdx].Store(time.Now().Unix())
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// Transport keepalive: a 1-byte packet every 20s keeps amurcanov's
+	// per-conn DTLS session from idling out. With NumConns conns sharing ONE
+	// WG device, most conns rarely carry a WG packet, so WG's own 25s
+	// keepalive (which rides only one random conn) can't keep them all alive.
+	// The server treats a 1-byte read as a transport keepalive; even if it
+	// forwarded the byte to WireGuard, WG drops it as a malformed message.
+	// We skip 1-byte reads on the recv side below.
+	go func() {
+		ticker := time.NewTicker(20 * time.Second)
+		defer ticker.Stop()
+		ka := []byte{0x00}
+		for {
+			select {
+			case <-connCtx.Done():
+				return
+			case <-ticker.C:
+				dtlsConn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+				if _, werr := dtlsConn.Write(ka); werr != nil {
+					return
+				}
+			}
+		}
+	}()
+
+	// Send: sendCh → dtlsConn (shared across all conns; WG packets land on
+	// whichever conn's goroutine grabs them).
+	go func() {
+		defer wg.Done()
+		defer connCancel()
+		for {
+			select {
+			case <-connCtx.Done():
+				return
+			case pkt := <-p.sendCh:
+				dtlsConn.SetWriteDeadline(time.Now().Add(30 * time.Second))
+				if _, werr := dtlsConn.Write(pkt); werr != nil {
+					log.Printf("proxy: [conn %d] WRAP-A send: write error: %v", connIdx, werr)
+					return
+				}
+			}
+		}
+	}()
+
+	// Receive: dtlsConn → recvCh. Mirrors runDTLSSession's global-health
+	// staleness handling (don't kill a conn that simply didn't get packets;
+	// only reconnect when the whole tunnel is stale) + iOS-freeze detection.
+	go func() {
+		defer wg.Done()
+		defer connCancel()
+		buf := make([]byte, 1600)
+		for {
+			deadlineSetAt := time.Now()
+			dtlsConn.SetReadDeadline(deadlineSetAt.Add(30 * time.Second))
+			n, rerr := dtlsConn.Read(buf)
+			if rerr != nil {
+				if connCtx.Err() != nil {
+					return
+				}
+				if strings.Contains(rerr.Error(), "timeout") || strings.Contains(rerr.Error(), "deadline exceeded") {
+					elapsed := time.Since(deadlineSetAt)
+					if elapsed > 90*time.Second {
+						log.Printf("proxy: [conn %d] WRAP-A read elapsed %s (freeze detected), resetting lastRecvTime",
+							connIdx, elapsed.Round(time.Second))
+						p.lastRecvTime.Store(time.Now().Unix())
+						continue
+					}
+					lastRecv := p.lastRecvTime.Load()
+					if lastRecv > 0 && time.Since(time.Unix(lastRecv, 0)) < 3*time.Minute {
+						continue
+					}
+					log.Printf("proxy: [conn %d] WRAP-A read timeout, tunnel stale, reconnecting", connIdx)
+					return
+				}
+				log.Printf("proxy: [conn %d] WRAP-A read error: %v", connIdx, rerr)
+				return
+			}
+			// Skip the server's 1-byte transport keepalive — it must NOT reach
+			// WireGuard (which would treat it as an invalid message type).
+			if n <= 1 {
+				continue
+			}
+			p.lastRecvTime.Store(time.Now().Unix())
+			pkt := recvPktPoolGet(n)
+			copy(pkt, buf[:n])
+			select {
+			case p.recvCh <- pkt:
+			case <-connCtx.Done():
+				recvPktPoolPut(pkt)
+				return
+			}
+		}
+	}()
+
+	wg.Wait()
+	return nil
+}
+
+// dialDTLSWrapA dials a plain DTLS client over the WRAP-A transport using
+// amurcanov's exact config (single cipher TLS_ECDHE_ECDSA_WITH_AES_128_GCM_
+// SHA256, RequireExtendedMasterSecret, send-only 8-byte ConnectionID — from
+// his go_client/session.go, mirrored in tools/wrapa_test). One handshake
+// retry: M3 saw a transient ~20s handshake timeout from UDP loss on the first
+// attempt that cleared on retry.
+func dialDTLSWrapA(ctx context.Context, transport net.PacketConn, peer *net.UDPAddr) (net.Conn, error) {
+	cert, err := selfsign.GenerateSelfSigned()
+	if err != nil {
+		return nil, err
+	}
+	config := &dtls.Config{
+		Certificates:          []tls.Certificate{cert},
+		InsecureSkipVerify:    true,
+		ExtendedMasterSecret:  dtls.RequireExtendedMasterSecret,
+		CipherSuites:          []dtls.CipherSuiteID{dtls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256},
+		ConnectionIDGenerator: dtls.OnlySendCIDGenerator(),
+	}
+	var lastErr error
+	for attempt := 1; attempt <= 2; attempt++ {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		dconn, derr := dtls.Client(transport, peer, config)
+		if derr != nil {
+			lastErr = derr
+			continue
+		}
+		hsCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		herr := dconn.HandshakeContext(hsCtx)
+		cancel()
+		if herr == nil {
+			return dconn, nil
+		}
+		_ = dconn.Close()
+		lastErr = herr
+		if ctx.Err() != nil {
+			break
+		}
+		log.Printf("proxy: WRAP-A DTLS handshake attempt %d failed: %v — retrying", attempt, herr)
+	}
+	return nil, lastErr
+}
+
+// storeWrapAProvision records the server-minted WireGuard config exactly once
+// (the first runWrapASession to finish GETCONF) and wakes any
+// WaitWrapAProvision callers by closing wrapAProvCh.
+func (p *Proxy) storeWrapAProvision(prov *WrapAProvision) {
+	p.wrapAProvOnce.Do(func() {
+		p.wrapAProv.Store(prov)
+		if p.wrapAProvCh != nil {
+			close(p.wrapAProvCh)
+		}
+		log.Printf("proxy: WRAP-A provisioned: addr=%s dns=%s mtu=%d keepalive=%d",
+			prov.Address, prov.DNS, prov.MTU, prov.KeepaliveSec)
+	})
+}
+
+// WaitWrapAProvision blocks until WRAP-A GETCONF provisioning has produced the
+// server-minted WireGuard config, the proxy stopped, or the timeout expired.
+// The bridge calls this after WaitBootstrap to build the WG UAPI + iOS network
+// settings from server-provided crypto.
+func (p *Proxy) WaitWrapAProvision(timeout time.Duration) (*WrapAProvision, error) {
+	if p.wrapAProvCh == nil {
+		return nil, fmt.Errorf("WRAP-A not enabled")
+	}
+	select {
+	case <-p.wrapAProvCh:
+		return p.wrapAProv.Load(), nil
+	case <-time.After(timeout):
+		return nil, fmt.Errorf("WRAP-A provision timeout after %s", timeout)
+	case <-p.ctx.Done():
+		return nil, p.ctx.Err()
+	}
 }
 
 // runTURN establishes a TURN relay and forwards packets between conn2 and the relay.
