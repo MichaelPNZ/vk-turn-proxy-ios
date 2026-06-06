@@ -1130,6 +1130,12 @@ Evidence:
 - `healthz.txt` and `readyz.txt` show no `127.0.0.1:56080` admin listener, matching the currently running legacy production service;
 - production binary sha256 is `275ff8e9308392620b424ad59ce8ba095e5f4872f5de9cd4b9baa7fc37dfaf23`.
 
+Update on 2026-06-07: `scripts/collect-server-production-evidence.sh` now writes
+`server-status.txt` and appends the same machine-readable fields to `summary.txt`:
+`service`, `listener_56004`, `listener_56080`, `healthz`, `readyz`, and `metrics`.
+This keeps baseline evidence readable while preserving the distinction between
+legacy production audit evidence and final production smoke evidence.
+
 Apple signing/TestFlight evidence:
 
 ```bash

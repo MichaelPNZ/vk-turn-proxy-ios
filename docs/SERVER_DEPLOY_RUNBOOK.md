@@ -161,6 +161,9 @@ Expected for the existing legacy service:
 - health files may show connection refused if the old binary/unit has no
   `-health-listen`
 - `summary.txt` contains `evidence_type=server_production_baseline`
+- `summary.txt` and `server-status.txt` include machine-readable fields:
+  `service`, `listener_56004`, `listener_56080`, `healthz`, `readyz`, and
+  `metrics`
 
 This baseline is useful for audit and rollback context. It does not satisfy
 `SERVER_PRODUCTION_SMOKE_EVIDENCE` in final readiness.
@@ -174,6 +177,13 @@ Last read-only production baseline on 2026-06-06:
 - health: `healthz.txt` and `readyz.txt` show connection refused on `127.0.0.1:56080`, which matches the current legacy service without admin health;
 - current production binary sha256: `275ff8e9308392620b424ad59ce8ba095e5f4872f5de9cd4b9baa7fc37dfaf23`;
 - current production unit sha256: `83e58992c30031e8c0fd6215f6c87b6d5bec55a9696d96b0266ee93bb024b28c`.
+
+Fresh read-only production baseline on 2026-06-07:
+
+- command: `MODE=baseline HOST=142.252.220.91 SSH_USER=root scripts/collect-server-production-evidence.sh build/evidence/server-production-baseline-2026-06-07-status-fields`;
+- result: `summary.txt` has `result=passed`, `evidence_type=server_production_baseline`, and `attachment_count=10`;
+- status fields: `service=active`, `listener_56004=present`, `listener_56080=missing`, `healthz=missing`, `readyz=missing`, `metrics=missing`;
+- production service remains the legacy running service without admin health on `127.0.0.1:56080`.
 
 ## Promote
 

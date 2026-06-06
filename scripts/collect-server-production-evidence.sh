@@ -76,6 +76,52 @@ ssh_readonly "ss -ltnup | grep -E ':(56004|56080) ' || true" > "$EVIDENCE_DIR/li
 ssh_readonly "sha256sum /usr/local/bin/vk-turn-proxy-server /etc/systemd/system/vk-turn-proxy-ios.service /etc/logrotate.d/vk-turn-proxy-ios 2>/dev/null || true" > "$EVIDENCE_DIR/production-sha256.txt" 2>&1 || true
 ssh_readonly "tail -200 /var/log/vk-turn-proxy-ios.log 2>/dev/null || journalctl -u vk-turn-proxy-ios.service -n 200 --no-pager" > "$EVIDENCE_DIR/server-log-tail.txt" 2>&1 || true
 
+status_from_exact_file() {
+  local file="$1"
+  local expected="$2"
+  if grep -q "^$expected$" "$file"; then
+    echo "$expected"
+  elif grep -qiE 'failed to connect|connection refused|could not resolve|timed out|empty reply' "$file"; then
+    echo "missing"
+  elif [[ -s "$file" ]]; then
+    echo "unexpected"
+  else
+    echo "missing"
+  fi
+}
+
+service_status="inactive"
+if grep -q '^active$' "$EVIDENCE_DIR/systemctl-is-active.txt"; then
+  service_status="active"
+elif [[ -s "$EVIDENCE_DIR/systemctl-is-active.txt" ]]; then
+  service_status="$(head -1 "$EVIDENCE_DIR/systemctl-is-active.txt" | tr -d '\r')"
+fi
+listener_56004="missing"
+if grep -q ':56004' "$EVIDENCE_DIR/listeners.txt"; then
+  listener_56004="present"
+fi
+listener_56080="missing"
+if grep -q ':56080' "$EVIDENCE_DIR/listeners.txt"; then
+  listener_56080="present"
+fi
+healthz_status="$(status_from_exact_file "$EVIDENCE_DIR/healthz.txt" ok)"
+readyz_status="$(status_from_exact_file "$EVIDENCE_DIR/readyz.txt" ready)"
+metrics_status="missing"
+if grep -q '^vk_turn_proxy_' "$EVIDENCE_DIR/metrics-head.txt"; then
+  metrics_status="present"
+elif [[ -s "$EVIDENCE_DIR/metrics-head.txt" && "$healthz_status" != "missing" ]]; then
+  metrics_status="unexpected"
+fi
+
+cat > "$EVIDENCE_DIR/server-status.txt" <<EOF
+service=$service_status
+listener_56004=$listener_56004
+listener_56080=$listener_56080
+healthz=$healthz_status
+readyz=$readyz_status
+metrics=$metrics_status
+EOF
+
 if [[ -n "$BACKUP_DIR" ]]; then
   copy_remote_file_if_exists "$BACKUP_DIR/before-promote.txt" "before-promote.txt"
   copy_remote_file_if_exists "$BACKUP_DIR/after-promote.txt" "after-promote.txt"
@@ -131,4 +177,5 @@ if [[ "$MODE" == "final" ]]; then
 else
   "$ROOT_DIR/scripts/write-smoke-evidence-summary.sh" server_production_baseline "$EVIDENCE_DIR"
 fi
+cat "$EVIDENCE_DIR/server-status.txt" >> "$EVIDENCE_DIR/summary.txt"
 printf 'evidence_dir=%s\n' "$EVIDENCE_DIR"
