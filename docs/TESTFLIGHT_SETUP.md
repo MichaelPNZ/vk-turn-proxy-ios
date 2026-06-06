@@ -98,6 +98,58 @@ Store Connect env is configured, and Apple Distribution signing is valid:
 `all` uploads iOS and macOS to TestFlight and attaches Android, Windows, server,
 and checksum artifacts to the GitHub Release.
 
+## GitHub Actions TestFlight Upload
+
+The repository also has a manual/tag workflow:
+
+- `.github/workflows/testflight-release.yml`
+- `scripts/install-apple-signing-assets.sh`
+
+Add these GitHub repository secrets before running it:
+
+- `APPLE_DISTRIBUTION_CERT_P12_BASE64`
+- `APPLE_DISTRIBUTION_CERT_PASSWORD`
+- `APPLE_PROVISIONING_PROFILES_BASE64`
+- `APPSTORE_KEY_ID`
+- `APPSTORE_ISSUER_ID`
+- `APPSTORE_CONNECT_API_KEY_P8_BASE64`
+
+Encode the signing assets without printing secret contents:
+
+```bash
+base64 -i /absolute/path/AppleDistribution.p12 | pbcopy
+```
+
+Create one zip that contains all four App Store/TestFlight distribution
+profiles, then encode it:
+
+```bash
+zip -j /tmp/vk-turn-proxy-profiles.zip \
+  /absolute/path/com.vkturnproxy.app.mobileprovision \
+  /absolute/path/com.vkturnproxy.app.tunnel.mobileprovision \
+  /absolute/path/com.vkturnproxy.mac.provisionprofile \
+  /absolute/path/com.vkturnproxy.mac.tunnel.provisionprofile
+
+base64 -i /tmp/vk-turn-proxy-profiles.zip | pbcopy
+```
+
+Encode the App Store Connect API key:
+
+```bash
+base64 -i /absolute/path/AuthKey_<APPSTORE_KEY_ID>.p8 | pbcopy
+```
+
+Run the workflow from GitHub Actions:
+
+- workflow: `TestFlight Release`
+- tag: `v1.0-build156`
+- target: `all`, `ios`, or `macos`
+
+Tag pushes matching `v*build*` also trigger the workflow. The workflow installs
+Apple signing assets into a temporary keychain, writes ignored
+`VKTurnProxy/AppStoreConnect.env`, runs `scripts/preflight-testflight.sh`, and
+then runs `./release.sh <tag> <target>`.
+
 ## Smoke Evidence
 
 After a real iPhone TestFlight Network Extension smoke, export the in-app VPN

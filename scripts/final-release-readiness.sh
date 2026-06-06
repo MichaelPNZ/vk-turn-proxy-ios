@@ -223,6 +223,7 @@ check_shell_syntax \
   scripts/collect-apple-smoke-evidence.sh \
   scripts/collect-server-production-evidence.sh \
   scripts/diagnose-apple-signing.sh \
+  scripts/install-apple-signing-assets.sh \
   scripts/build-windows-service.sh \
   scripts/deploy-server-vps.sh \
   scripts/final-release-readiness.sh \
