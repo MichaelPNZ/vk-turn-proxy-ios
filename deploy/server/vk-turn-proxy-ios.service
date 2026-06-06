@@ -1,0 +1,24 @@
+[Unit]
+Description=VK TURN Proxy iOS/macOS/Android SRTP listener
+Documentation=https://github.com/anton48/vk-turn-proxy-ios
+After=network-online.target wg-quick@wg-vkturn.service
+Wants=network-online.target
+Requires=wg-quick@wg-vkturn.service
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/vk-turn-proxy-ios.env
+ExecStart=/usr/local/bin/vk-turn-proxy-server \
+  -listen ${VKTURN_LISTEN} \
+  -connect ${VKTURN_CONNECT} \
+  -srtp \
+  -logfile ${VKTURN_LOGFILE} \
+  -health-listen ${VKTURN_HEALTH_LISTEN} \
+  -session-idle-timeout ${VKTURN_SESSION_IDLE_TIMEOUT}
+Restart=always
+RestartSec=3
+LimitNOFILE=1048576
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

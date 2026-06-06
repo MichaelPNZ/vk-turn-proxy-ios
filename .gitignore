@@ -31,6 +31,14 @@ vendor/
 # go test with -memprofile/-c leaves <pkg>.test binaries
 *.test
 
+# Gradle / Android local state
+.gradle/
+local.properties
+androidApp/signing.properties
+*.jks
+*.keystore
+*.p12
+
 # App Store Connect API credentials (Issuer ID / Key ID / p8 path)
 AppStoreConnect.env
 

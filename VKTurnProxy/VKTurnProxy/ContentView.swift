@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 import os.log
 
 private let captchaLog = OSLog(subsystem: "com.vkturnproxy.app", category: "Captcha")
+private let defaultNumConnections = 10
 
 struct ContentView: View {
     @StateObject private var tunnel = TunnelManager()
@@ -52,7 +53,7 @@ struct ContentView: View {
     // to the TURN relay and you'd rather take VK's allocation-rate
     // hit than not connect at all.
     @AppStorage("useUDP") private var useUDP = false
-    @AppStorage("numConnections") private var numConnections = 30
+    @AppStorage("numConnections") private var numConnections = defaultNumConnections
     @AppStorage("credPoolCooldownSeconds") private var credPoolCooldownSeconds = 150
 
     /// SRTP-WRAP-A requires a non-empty password (it derives the obfuscation
@@ -339,7 +340,7 @@ struct SettingsView: View {
     // to the TURN relay and you'd rather take VK's allocation-rate
     // hit than not connect at all.
     @AppStorage("useUDP") private var useUDP = false
-    @AppStorage("numConnections") private var numConnections = 30
+    @AppStorage("numConnections") private var numConnections = defaultNumConnections
     @AppStorage("credPoolCooldownSeconds") private var credPoolCooldownSeconds = 150
 
     // Backup & Restore state. exportURL drives the share sheet; the
@@ -903,7 +904,9 @@ struct StatsView: View {
             }
 
             HStack {
-                StatBox(title: "Conns", value: "\(tunnel.stats.activeConns)/\(tunnel.stats.totalConns)", sub: nil)
+                let requested = tunnel.stats.requestedConns > 0 ? tunnel.stats.requestedConns : tunnel.stats.totalConns
+                let degraded = requested > 0 && tunnel.stats.activeConns < requested
+                StatBox(title: "Conns", value: "\(tunnel.stats.activeConns)/\(requested)", sub: degraded ? "degraded" : nil)
                 StatBox(title: "Reconnects", value: "\(tunnel.stats.reconnects)", sub: nil)
             }
 
@@ -1824,24 +1827,25 @@ struct LogsView: View {
                 reason = "Log file present but readLogs returned empty (current=\(status.currentBytes)B, archived=\(status.archivedBytes)B at \(status.containerPath))"
             }
 
-            var combined = mainAppLogs + extensionLogs
-            if combined.isEmpty {
-                combined = "No logs available.\n\nReason: \(reason)\n\n" +
+            let rawCombined = mainAppLogs + extensionLogs
+            let combinedText: String
+            if rawCombined.isEmpty {
+                combinedText = "No logs available.\n\nReason: \(reason)\n\n" +
                     "Try reconnecting the tunnel, or — if the issue persists — " +
                     "Reset TURN Cache and reconnect to force a fresh log session."
             } else {
-                combined = "⚠️ Showing os_log fallback (recent ~30 min only, " +
+                combinedText = "⚠️ Showing os_log fallback (recent ~30 min only, " +
                     "may be incomplete and out of order).\n" +
                     "Reason: \(reason)\n\n" +
-                    combined
+                    rawCombined
             }
 
             await MainActor.run {
-                fallbackText = combined
+                fallbackText = combinedText
                 fallbackFetchedAt = Date()
                 fallbackInFlight = false
                 if usingOSLogFallback {
-                    logText = truncated(combined)
+                    logText = truncated(combinedText)
                 }
             }
         }

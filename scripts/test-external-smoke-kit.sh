@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TAG="${TAG:-v1.0-build156}"
+OUT_DIR="$(mktemp -d "$ROOT_DIR/build/test-external-smoke-kit-$TAG.XXXXXX")"
+trap 'rm -rf "$OUT_DIR"' EXIT
+
+"$ROOT_DIR/scripts/prepare-external-smoke-kit.sh" "$TAG" "$OUT_DIR" >/dev/null
+
+required=(
+  README.md
+  summary.txt
+  cross-platform-sha256.txt
+  commands/android-physical-smoke.sh
+  commands/collect-iphone-testflight-evidence.sh
+  commands/collect-macos-testflight-evidence.sh
+  templates/windows-runtime-smoke.ps1
+  templates/windows-installer-smoke.ps1
+  templates/server-production-final.sh
+  templates/final-readiness.env.example
+)
+
+for file in "${required[@]}"; do
+  [[ -f "$OUT_DIR/$file" ]] || {
+    echo "Missing kit file: $OUT_DIR/$file" >&2
+    exit 1
+  }
+done
+
+bash -n \
+  "$OUT_DIR/commands/android-physical-smoke.sh" \
+  "$OUT_DIR/commands/collect-iphone-testflight-evidence.sh" \
+  "$OUT_DIR/commands/collect-macos-testflight-evidence.sh" \
+  "$OUT_DIR/templates/server-production-final.sh"
+
+grep -q '^result=prepared$' "$OUT_DIR/summary.txt"
+grep -q "scripts/final-release-readiness.sh \"$TAG\"" "$OUT_DIR/README.md"
+grep -q '^export ANDROID_PHYSICAL_SMOKE_EVIDENCE=' "$OUT_DIR/templates/final-readiness.env.example"
+grep -q '^export SERVER_PRODUCTION_SMOKE_EVIDENCE=' "$OUT_DIR/templates/final-readiness.env.example"
+grep -q 'REQUIRE_PHYSICAL_DEVICE=1' "$OUT_DIR/commands/android-physical-smoke.sh"
+grep -q 'CONFIRM_PRODUCTION_PROMOTE=142.252.220.91:56004' "$OUT_DIR/templates/server-production-final.sh"
+grep -q 'exit 64' "$OUT_DIR/templates/server-production-final.sh"
+
+if grep -RE 'vkturnproxy://import\?data=[A-Za-z0-9_-]{20,}' "$OUT_DIR" >/dev/null; then
+  echo "External smoke kit must not embed concrete import links." >&2
+  exit 1
+fi
+if grep -R 'APPSTORE_KEY_ID=.*[A-Z0-9]' "$OUT_DIR" >/dev/null; then
+  echo "External smoke kit must not embed App Store Connect key ids." >&2
+  exit 1
+fi
+
+printf 'external smoke kit ok\n'

@@ -202,12 +202,9 @@ func dialBrowserTLS(ctx context.Context, network, addr string, forceH1 bool, hel
 		dialAddrs = []string{addr}
 	}
 
-	dialer := &net.Dialer{
-		// Per-IP connect timeout — short enough that walking 4-5 IPs
-		// stays well under the outer request budget.
-		Timeout:   8 * time.Second,
-		KeepAlive: 30 * time.Second,
-	}
+	// Per-IP connect timeout — short enough that walking 4-5 IPs stays
+	// well under the outer request budget.
+	dialer := protectedDialer(8*time.Second, 30*time.Second)
 
 	var rawConn net.Conn
 	var lastErr error

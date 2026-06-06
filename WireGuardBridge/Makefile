@@ -4,13 +4,16 @@ DESTDIR ?= $(BUILDDIR)
 # iOS SDK paths
 IOS_SDK := $(shell xcrun --sdk iphoneos --show-sdk-path 2>/dev/null)
 IOS_SIM_SDK := $(shell xcrun --sdk iphonesimulator --show-sdk-path 2>/dev/null)
+MACOS_SDK := $(shell xcrun --sdk macosx --show-sdk-path 2>/dev/null)
 IOS_MIN_VERSION := 15.0
+MACOS_MIN_VERSION := 14.0
 
 # Go settings
 export CGO_ENABLED := 1
 export GOARCH := arm64
 
-GO_BUILD_FLAGS := -buildmode=c-archive -trimpath -tags ios
+GO_BUILD_FLAGS := -buildmode=c-archive -trimpath
+IOS_GO_BUILD_FLAGS := $(GO_BUILD_FLAGS) -tags ios
 export GONOSUMCHECK := *
 export GONOSUMDB := *
 export GOFLAGS := -mod=mod
@@ -21,7 +24,7 @@ GO_LDFLAGS := -s -w
 REAL_GOROOT := $(shell go env GOROOT 2>/dev/null)
 PATCHED_GOROOT := $(BUILDDIR)/goroot
 
-.PHONY: all clean ios-device ios-simulator xcframework goroot
+.PHONY: all clean ios-device ios-simulator macos-arm64 macos-x86_64 macos-universal xcframework goroot
 
 all: xcframework
 
@@ -55,7 +58,7 @@ ios-device: goroot
 	GOOS=ios \
 	CGO_ENABLED=1 \
 	CC="$(shell xcrun --sdk iphoneos -f clang) -isysroot $(IOS_SDK) -arch arm64 -miphoneos-version-min=$(IOS_MIN_VERSION)" \
-	go build $(GO_BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -o $(BUILDDIR)/libwg-turn-ios-arm64.a .
+	go build $(IOS_GO_BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -o $(BUILDDIR)/libwg-turn-ios-arm64.a .
 	@echo "==> Done: $(BUILDDIR)/libwg-turn-ios-arm64.a"
 
 # Build for iOS Simulator (arm64 for Apple Silicon)
@@ -68,16 +71,50 @@ ios-simulator: goroot
 	GOOS=ios \
 	CGO_ENABLED=1 \
 	CC="$(shell xcrun --sdk iphonesimulator -f clang) -isysroot $(IOS_SIM_SDK) -arch arm64 -miphonesimulator-version-min=$(IOS_MIN_VERSION)" \
-	go build $(GO_BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -o $(BUILDDIR)/libwg-turn-sim-arm64.a .
+	go build $(IOS_GO_BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -o $(BUILDDIR)/libwg-turn-sim-arm64.a .
 	@echo "==> Done: $(BUILDDIR)/libwg-turn-sim-arm64.a"
 
-# Create XCFramework from both architectures
-xcframework: ios-device ios-simulator
+# Build for macOS (arm64)
+macos-arm64:
+	@echo "==> Building for macOS (arm64)..."
+	CGO_CFLAGS="-isysroot $(MACOS_SDK) -arch arm64 -mmacosx-version-min=$(MACOS_MIN_VERSION)" \
+	CGO_LDFLAGS="-isysroot $(MACOS_SDK) -arch arm64 -mmacosx-version-min=$(MACOS_MIN_VERSION)" \
+	GOARCH=arm64 \
+	GOOS=darwin \
+	CGO_ENABLED=1 \
+	CC="$(shell xcrun --sdk macosx -f clang) -isysroot $(MACOS_SDK) -arch arm64 -mmacosx-version-min=$(MACOS_MIN_VERSION)" \
+	go build $(GO_BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -o $(BUILDDIR)/libwg-turn-macos-arm64.a .
+	@echo "==> Done: $(BUILDDIR)/libwg-turn-macos-arm64.a"
+
+# Build for macOS (x86_64)
+macos-x86_64:
+	@echo "==> Building for macOS (x86_64)..."
+	CGO_CFLAGS="-isysroot $(MACOS_SDK) -arch x86_64 -mmacosx-version-min=$(MACOS_MIN_VERSION)" \
+	CGO_LDFLAGS="-isysroot $(MACOS_SDK) -arch x86_64 -mmacosx-version-min=$(MACOS_MIN_VERSION)" \
+	GOARCH=amd64 \
+	GOOS=darwin \
+	CGO_ENABLED=1 \
+	CC="$(shell xcrun --sdk macosx -f clang) -isysroot $(MACOS_SDK) -arch x86_64 -mmacosx-version-min=$(MACOS_MIN_VERSION)" \
+	go build $(GO_BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -o $(BUILDDIR)/libwg-turn-macos-x86_64.a .
+	@echo "==> Done: $(BUILDDIR)/libwg-turn-macos-x86_64.a"
+
+macos-universal: macos-arm64 macos-x86_64
+	@echo "==> Creating universal macOS static archive..."
+	lipo -create \
+		$(BUILDDIR)/libwg-turn-macos-arm64.a \
+		$(BUILDDIR)/libwg-turn-macos-x86_64.a \
+		-output $(BUILDDIR)/libwg-turn-macos-universal.a
+	lipo -info $(BUILDDIR)/libwg-turn-macos-universal.a
+	@echo "==> Done: $(BUILDDIR)/libwg-turn-macos-universal.a"
+
+# Create XCFramework from Apple target architectures
+xcframework: ios-device ios-simulator macos-universal
 	@echo "==> Creating XCFramework..."
 	rm -rf $(DESTDIR)/WireGuardTURN.xcframework
 	xcodebuild -create-xcframework \
 		-library $(BUILDDIR)/libwg-turn-ios-arm64.a -headers $(CURDIR)/include \
 		-library $(BUILDDIR)/libwg-turn-sim-arm64.a -headers $(CURDIR)/include \
+		-library $(BUILDDIR)/libwg-turn-macos-universal.a -headers $(CURDIR)/include \
 		-output $(DESTDIR)/WireGuardTURN.xcframework
 	@echo "==> Done: $(DESTDIR)/WireGuardTURN.xcframework"
 

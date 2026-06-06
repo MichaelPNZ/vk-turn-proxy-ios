@@ -3,24 +3,38 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 54;
 	objects = {
 
 /* Begin PBXBuildFile section */
 		0470680ADE2F45AF53C9277D /* WireGuardTURN.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 99E2AC40D13D6F8DD598752A /* WireGuardTURN.xcframework */; };
+		090CF6FD655E2016ACF74417 /* OSLogReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B579DDFDDB7800E681CAC9C4 /* OSLogReader.swift */; };
 		118478458E595AEBEEA20266 /* TunnelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = E74B178DC212A229BC8565F4 /* TunnelManager.swift */; };
+		15D9CD9806E59601E32E67BD /* NetworkExtension.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 605ED1D89D0F1886A8414767 /* NetworkExtension.framework */; };
+		19F4F2542C745D0EBB1E92EB /* WireGuardTURN.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 99E2AC40D13D6F8DD598752A /* WireGuardTURN.xcframework */; };
 		1B2231DF1954F65A65A76DF6 /* WireGuardTURN.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 99E2AC40D13D6F8DD598752A /* WireGuardTURN.xcframework */; };
 		2263C90DC75E56A0D637B2B4 /* CredCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = B72BF34DDA41B9171843CDA5 /* CredCache.swift */; };
+		27ACC1C3A742C6AE0BB6B6EF /* VKTurnShared.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 50208C0ECCC119290715CBF3 /* VKTurnShared.xcframework */; };
+		3E60D0B469EEADA8D9F7C730 /* SharedLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A648919F90B0D8CBE826BC6E /* SharedLogger.swift */; };
 		3F33AE79B74735B536FE1D31 /* SharedLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A648919F90B0D8CBE826BC6E /* SharedLogger.swift */; };
 		4FB5626AA1842BFC42564DBF /* PacketTunnel.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = E28ACD6367F3CDE026C71A36 /* PacketTunnel.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		531770923AA31FCCCD55A31A /* MacContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB127FE4D072CF111BFABE7B /* MacContentView.swift */; };
 		5474956678AC676C6E7AE2E6 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 50685ED014984982ABF8CF0C /* Assets.xcassets */; };
 		5BFFE56605C7A3D0A4672924 /* VKTurnProxyApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDE10D4B4A2BE32E0DD5E3D4 /* VKTurnProxyApp.swift */; };
+		6C46741E23B42CEA8167D383 /* VKTurnProxyMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 165958B67EBF2E99209F0640 /* VKTurnProxyMacApp.swift */; };
+		74650829753B15E9C3591CB1 /* MacTunnelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0867F44DF0A3CC0ED477BE15 /* MacTunnelManager.swift */; };
+		75B525B064ABA399BD12BE7C /* Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = F16CAECB3D91AC18F93D32C0 /* Info.plist */; };
+		75CFEFD1C373EA51592784A0 /* MacPacketTunnel.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 72A1A7279E04CB12BB35C7BA /* MacPacketTunnel.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		7D5BE8912D686FBFB3143EA1 /* NetworkExtension.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 605ED1D89D0F1886A8414767 /* NetworkExtension.framework */; };
+		7F96E37E88410B5354EC2F17 /* VKTurnShared.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 50208C0ECCC119290715CBF3 /* VKTurnShared.xcframework */; };
 		90CBABBC0C21BE682CF22ACF /* OSLogReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B579DDFDDB7800E681CAC9C4 /* OSLogReader.swift */; };
 		96F82C428BBBE30E65182344 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3F6AB47B5515172AD460053 /* ContentView.swift */; };
 		9FC59D2A14AA5E66C86F6C95 /* OSLogReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B579DDFDDB7800E681CAC9C4 /* OSLogReader.swift */; };
+		B1920CA5196EAF5E5B3CE86F /* SharedLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A648919F90B0D8CBE826BC6E /* SharedLogger.swift */; };
 		B1B5B221672B08CCCC35BE51 /* PacketTunnelProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D06132B25271A4E9DA8F0C6 /* PacketTunnelProvider.swift */; };
+		C394823753BAA17327FF395E /* NetworkExtension.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 605ED1D89D0F1886A8414767 /* NetworkExtension.framework */; };
 		CBF9B6203060C546C778DABA /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD358E048E7135E1596359E1 /* AppConfig.swift */; };
+		D5BA47EA0372DF8D79CEB1AE /* PacketTunnelProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D06132B25271A4E9DA8F0C6 /* PacketTunnelProvider.swift */; };
 		E1250E1BF6D8FBFBCCFB25BF /* VKProfileCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48CEB6CB28E1CC064B6D8C79 /* VKProfileCache.swift */; };
 		F32EA8BA9CCC4E95BD4DFA12 /* NetworkExtension.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 605ED1D89D0F1886A8414767 /* NetworkExtension.framework */; };
 		F5781EB3D4D7E0467DC2A5F5 /* SharedLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A648919F90B0D8CBE826BC6E /* SharedLogger.swift */; };
@@ -28,6 +42,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		6AE6E07A2200FCDBEB98B8BD /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 5024C6C147B3FDF72E10E537 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B4C13A85BC645A2A78262662;
+			remoteInfo = MacPacketTunnel;
+		};
 		DC1BB6D5C784F7552F468357 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 5024C6C147B3FDF72E10E537 /* Project object */;
@@ -38,6 +59,17 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
+		03183869FDC9F2AFF6432C37 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				75CFEFD1C373EA51592784A0 /* MacPacketTunnel.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		2350F4F39BFDD430EFA37AAC /* Embed Foundation Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
@@ -53,13 +85,18 @@
 
 /* Begin PBXFileReference section */
 		00AF3235469FAE0005F97B29 /* BridgeHeader.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = BridgeHeader.h; sourceTree = "<group>"; };
+		0867F44DF0A3CC0ED477BE15 /* MacTunnelManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacTunnelManager.swift; sourceTree = "<group>"; };
 		12A7A42ADDB7D021CA9C8352 /* VKTurnProxy.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = VKTurnProxy.entitlements; sourceTree = "<group>"; };
+		165958B67EBF2E99209F0640 /* VKTurnProxyMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VKTurnProxyMacApp.swift; sourceTree = "<group>"; };
+		23C75CAEE9171464A1E4E253 /* VKTurnProxyMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VKTurnProxyMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		3979E0E80EBC90588B51D4A5 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		48CEB6CB28E1CC064B6D8C79 /* VKProfileCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VKProfileCache.swift; sourceTree = "<group>"; };
 		4D06132B25271A4E9DA8F0C6 /* PacketTunnelProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PacketTunnelProvider.swift; sourceTree = "<group>"; };
 		4D13B015BF30B930DDDB8BBF /* BackupManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackupManager.swift; sourceTree = "<group>"; };
+		50208C0ECCC119290715CBF3 /* VKTurnShared.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = VKTurnShared.xcframework; path = ../shared/build/XCFrameworks/release/VKTurnShared.xcframework; sourceTree = "<group>"; };
 		50685ED014984982ABF8CF0C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		605ED1D89D0F1886A8414767 /* NetworkExtension.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = NetworkExtension.framework; path = System/Library/Frameworks/NetworkExtension.framework; sourceTree = SDKROOT; };
+		72A1A7279E04CB12BB35C7BA /* MacPacketTunnel.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = MacPacketTunnel.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		7342F754F29FF238732D4C8A /* VKTurnProxy.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = VKTurnProxy.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		99E2AC40D13D6F8DD598752A /* WireGuardTURN.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = WireGuardTURN.xcframework; path = ../WireGuardBridge/build/WireGuardTURN.xcframework; sourceTree = "<group>"; };
 		A01BE3EACAF5D00A44A0D32E /* PacketTunnel.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PacketTunnel.entitlements; sourceTree = "<group>"; };
@@ -69,9 +106,12 @@
 		AD358E048E7135E1596359E1 /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
 		B579DDFDDB7800E681CAC9C4 /* OSLogReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OSLogReader.swift; sourceTree = "<group>"; };
 		B72BF34DDA41B9171843CDA5 /* CredCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CredCache.swift; sourceTree = "<group>"; };
+		C7F452547B6CC20F7ABD5F53 /* MacApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MacApp.entitlements; sourceTree = "<group>"; };
+		CC74D2AEE3713F78F6D31117 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		E28ACD6367F3CDE026C71A36 /* PacketTunnel.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = PacketTunnel.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		E74B178DC212A229BC8565F4 /* TunnelManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunnelManager.swift; sourceTree = "<group>"; };
 		F16CAECB3D91AC18F93D32C0 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		FB127FE4D072CF111BFABE7B /* MacContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacContentView.swift; sourceTree = "<group>"; };
 		FDE10D4B4A2BE32E0DD5E3D4 /* VKTurnProxyApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VKTurnProxyApp.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -85,12 +125,31 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		5E5D19548EDA0AA1B7E13EA0 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				19F4F2542C745D0EBB1E92EB /* WireGuardTURN.xcframework in Frameworks */,
+				15D9CD9806E59601E32E67BD /* NetworkExtension.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7A665326C65C68D8FDC1C071 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C394823753BAA17327FF395E /* NetworkExtension.framework in Frameworks */,
+				7F96E37E88410B5354EC2F17 /* VKTurnShared.xcframework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		FDD4D50B4A2B8A282D81AE78 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 				F32EA8BA9CCC4E95BD4DFA12 /* NetworkExtension.framework in Frameworks */,
 				0470680ADE2F45AF53C9277D /* WireGuardTURN.xcframework in Frameworks */,
+				27ACC1C3A742C6AE0BB6B6EF /* VKTurnShared.xcframework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -111,8 +170,10 @@
 		150D6D20AA77CA102C2B0119 /* Products */ = {
 			isa = PBXGroup;
 			children = (
+				72A1A7279E04CB12BB35C7BA /* MacPacketTunnel.appex */,
 				E28ACD6367F3CDE026C71A36 /* PacketTunnel.appex */,
 				7342F754F29FF238732D4C8A /* VKTurnProxy.app */,
+				23C75CAEE9171464A1E4E253 /* VKTurnProxyMac.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -120,11 +181,24 @@
 		5FBB81F3908F682FDE2F7189 = {
 			isa = PBXGroup;
 			children = (
+				65F26711D1A56870F0A7E58C /* MacApp */,
 				05D165AC8B5B42686D871C6C /* PacketTunnel */,
 				9C68AA12FFBB168491B35540 /* VKTurnProxy */,
 				B6F1BD8B36C56C6FC2673195 /* Frameworks */,
 				150D6D20AA77CA102C2B0119 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		65F26711D1A56870F0A7E58C /* MacApp */ = {
+			isa = PBXGroup;
+			children = (
+				CC74D2AEE3713F78F6D31117 /* Info.plist */,
+				C7F452547B6CC20F7ABD5F53 /* MacApp.entitlements */,
+				FB127FE4D072CF111BFABE7B /* MacContentView.swift */,
+				0867F44DF0A3CC0ED477BE15 /* MacTunnelManager.swift */,
+				165958B67EBF2E99209F0640 /* VKTurnProxyMacApp.swift */,
+			);
+			path = MacApp;
 			sourceTree = "<group>";
 		};
 		9C68AA12FFBB168491B35540 /* VKTurnProxy */ = {
@@ -151,6 +225,7 @@
 			isa = PBXGroup;
 			children = (
 				605ED1D89D0F1886A8414767 /* NetworkExtension.framework */,
+				50208C0ECCC119290715CBF3 /* VKTurnShared.xcframework */,
 				99E2AC40D13D6F8DD598752A /* WireGuardTURN.xcframework */,
 			);
 			name = Frameworks;
@@ -163,6 +238,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 1EE330B93CD2DA7A4D1D289C /* Build configuration list for PBXNativeTarget "VKTurnProxy" */;
 			buildPhases = (
+				7E788A3670D589892B3261EF /* Build KMP Shared Framework */,
 				DDF7D137E68B787F0672E4CA /* Sources */,
 				B67F24B52097C82D38E1E6A8 /* Resources */,
 				FDD4D50B4A2B8A282D81AE78 /* Frameworks */,
@@ -174,11 +250,45 @@
 				0970FFC8ED62B8D5E5A59EEE /* PBXTargetDependency */,
 			);
 			name = VKTurnProxy;
-			packageProductDependencies = (
-			);
 			productName = VKTurnProxy;
 			productReference = 7342F754F29FF238732D4C8A /* VKTurnProxy.app */;
 			productType = "com.apple.product-type.application";
+		};
+		4487F5834824113ABEB727C7 /* VKTurnProxyMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CBCCE9D7987DFCCAE1F34BF8 /* Build configuration list for PBXNativeTarget "VKTurnProxyMac" */;
+			buildPhases = (
+				65EE74A9345D96F629AE5150 /* Build KMP Shared Framework */,
+				73A141AA32D9CE264E590459 /* Sources */,
+				7A665326C65C68D8FDC1C071 /* Frameworks */,
+				03183869FDC9F2AFF6432C37 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				91ADAB37D65D359FC480C541 /* PBXTargetDependency */,
+			);
+			name = VKTurnProxyMac;
+			productName = VKTurnProxyMac;
+			productReference = 23C75CAEE9171464A1E4E253 /* VKTurnProxyMac.app */;
+			productType = "com.apple.product-type.application";
+		};
+		B4C13A85BC645A2A78262662 /* MacPacketTunnel */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 95ED7011F8A4406AECA1F307 /* Build configuration list for PBXNativeTarget "MacPacketTunnel" */;
+			buildPhases = (
+				B09B7125D2DD45033C103AF7 /* Sources */,
+				4526D9BBA5BEFBF5BE2CA799 /* Resources */,
+				5E5D19548EDA0AA1B7E13EA0 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MacPacketTunnel;
+			productName = MacPacketTunnel;
+			productReference = 72A1A7279E04CB12BB35C7BA /* MacPacketTunnel.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 		DC014AC2B8038EB7433CDED3 /* PacketTunnel */ = {
 			isa = PBXNativeTarget;
@@ -192,8 +302,6 @@
 			dependencies = (
 			);
 			name = PacketTunnel;
-			packageProductDependencies = (
-			);
 			productName = PacketTunnel;
 			productReference = E28ACD6367F3CDE026C71A36 /* PacketTunnel.appex */;
 			productType = "com.apple.product-type.app-extension";
@@ -211,6 +319,14 @@
 						DevelopmentTeam = CDMQ33VFQC;
 						ProvisioningStyle = Automatic;
 					};
+					4487F5834824113ABEB727C7 = {
+						DevelopmentTeam = CDMQ33VFQC;
+						ProvisioningStyle = Automatic;
+					};
+					B4C13A85BC645A2A78262662 = {
+						DevelopmentTeam = CDMQ33VFQC;
+						ProvisioningStyle = Automatic;
+					};
 					DC014AC2B8038EB7433CDED3 = {
 						DevelopmentTeam = CDMQ33VFQC;
 						ProvisioningStyle = Automatic;
@@ -218,6 +334,7 @@
 				};
 			};
 			buildConfigurationList = A19B76F5B4AEC0D6FAAB8FE2 /* Build configuration list for PBXProject "VKTurnProxy" */;
+			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -225,19 +342,26 @@
 				en,
 			);
 			mainGroup = 5FBB81F3908F682FDE2F7189;
-			minimizedProjectReferenceProxies = 1;
-			preferredProjectObjectVersion = 77;
-			productRefGroup = 150D6D20AA77CA102C2B0119 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
+				B4C13A85BC645A2A78262662 /* MacPacketTunnel */,
 				DC014AC2B8038EB7433CDED3 /* PacketTunnel */,
 				41C7426A4820CE681FCBDC8E /* VKTurnProxy */,
+				4487F5834824113ABEB727C7 /* VKTurnProxyMac */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		4526D9BBA5BEFBF5BE2CA799 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				75B525B064ABA399BD12BE7C /* Info.plist in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		B67F24B52097C82D38E1E6A8 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -248,6 +372,47 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		65EE74A9345D96F629AE5150 /* Build KMP Shared Framework */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Build KMP Shared Framework";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "cd \"$SRCROOT/..\"\nANDROID_HOME=\"${ANDROID_HOME:-$HOME/Library/Android/sdk}\" ./gradlew :shared:assembleVKTurnSharedReleaseXCFramework\n";
+		};
+		7E788A3670D589892B3261EF /* Build KMP Shared Framework */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Build KMP Shared Framework";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "cd \"$SRCROOT/..\"\nANDROID_HOME=\"${ANDROID_HOME:-$HOME/Library/Android/sdk}\" ./gradlew :shared:assembleVKTurnSharedReleaseXCFramework\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		00033807B895DA426D3747A8 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -256,6 +421,27 @@
 				90CBABBC0C21BE682CF22ACF /* OSLogReader.swift in Sources */,
 				B1B5B221672B08CCCC35BE51 /* PacketTunnelProvider.swift in Sources */,
 				3F33AE79B74735B536FE1D31 /* SharedLogger.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		73A141AA32D9CE264E590459 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				531770923AA31FCCCD55A31A /* MacContentView.swift in Sources */,
+				74650829753B15E9C3591CB1 /* MacTunnelManager.swift in Sources */,
+				B1920CA5196EAF5E5B3CE86F /* SharedLogger.swift in Sources */,
+				6C46741E23B42CEA8167D383 /* VKTurnProxyMacApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B09B7125D2DD45033C103AF7 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				090CF6FD655E2016ACF74417 /* OSLogReader.swift in Sources */,
+				D5BA47EA0372DF8D79CEB1AE /* PacketTunnelProvider.swift in Sources */,
+				3E60D0B469EEADA8D9F7C730 /* SharedLogger.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -283,6 +469,11 @@
 			target = DC014AC2B8038EB7433CDED3 /* PacketTunnel */;
 			targetProxy = DC1BB6D5C784F7552F468357 /* PBXContainerItemProxy */;
 		};
+		91ADAB37D65D359FC480C541 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B4C13A85BC645A2A78262662 /* MacPacketTunnel */;
+			targetProxy = 6AE6E07A2200FCDBEB98B8BD /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
@@ -290,7 +481,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = PacketTunnel/PacketTunnel.entitlements;
-				CURRENT_PROJECT_VERSION = 155;
+				CURRENT_PROJECT_VERSION = 156;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/../WireGuardBridge/build",
@@ -320,11 +511,13 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = VKTurnProxy/VKTurnProxy.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 155;
+				CURRENT_PROJECT_VERSION = 156;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/../WireGuardBridge/build",
+					"$(PROJECT_DIR)/../shared/build/XCFrameworks/release",
 					"\"../WireGuardBridge/build\"",
+					"\"../shared/build/XCFrameworks/release\"",
 				);
 				INFOPLIST_FILE = VKTurnProxy/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -346,7 +539,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = PacketTunnel/PacketTunnel.entitlements;
-				CURRENT_PROJECT_VERSION = 155;
+				CURRENT_PROJECT_VERSION = 156;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/../WireGuardBridge/build",
@@ -369,6 +562,57 @@
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
+		};
+		54AE6C15CB47810AB3BC4D16 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = MacApp/MacApp.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 156;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/../shared/build/XCFrameworks/release",
+					"\"../shared/build/XCFrameworks/release\"",
+				);
+				INFOPLIST_FILE = MacApp/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.vkturnproxy.mac;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		577F87BF8C26404CAE2AC5C9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = MacPacketTunnel/MacPacketTunnel.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 156;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/../WireGuardBridge/build",
+					"\"../WireGuardBridge/build\"",
+				);
+				INFOPLIST_FILE = MacPacketTunnel/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"-lresolv",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.vkturnproxy.mac.tunnel;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = PacketTunnel/BridgeHeader.h;
+			};
+			name = Debug;
 		};
 		6AD31CFB046892E438EE1322 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -424,14 +668,37 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		7DA9FF53294D5C29920C23FB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = MacApp/MacApp.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 156;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/../shared/build/XCFrameworks/release",
+					"\"../shared/build/XCFrameworks/release\"",
+				);
+				INFOPLIST_FILE = MacApp/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.vkturnproxy.mac;
+				SDKROOT = macosx;
 			};
 			name = Debug;
 		};
@@ -441,11 +708,13 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = VKTurnProxy/VKTurnProxy.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CURRENT_PROJECT_VERSION = 155;
+				CURRENT_PROJECT_VERSION = 156;
 				FRAMEWORK_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PROJECT_DIR)/../WireGuardBridge/build",
+					"$(PROJECT_DIR)/../shared/build/XCFrameworks/release",
 					"\"../WireGuardBridge/build\"",
+					"\"../shared/build/XCFrameworks/release\"",
 				);
 				INFOPLIST_FILE = VKTurnProxy/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -511,13 +780,41 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		F290F96FAE6120CC394BB334 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = MacPacketTunnel/MacPacketTunnel.entitlements;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 156;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/../WireGuardBridge/build",
+					"\"../WireGuardBridge/build\"",
+				);
+				INFOPLIST_FILE = MacPacketTunnel/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"-lresolv",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.vkturnproxy.mac.tunnel;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = PacketTunnel/BridgeHeader.h;
 			};
 			name = Release;
 		};
@@ -529,6 +826,15 @@
 			buildConfigurations = (
 				3CFF4F04A3834FD7F0EEF873 /* Debug */,
 				848A2BACF05A1B10E8306F28 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		95ED7011F8A4406AECA1F307 /* Build configuration list for PBXNativeTarget "MacPacketTunnel" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				577F87BF8C26404CAE2AC5C9 /* Debug */,
+				F290F96FAE6120CC394BB334 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
@@ -547,6 +853,15 @@
 			buildConfigurations = (
 				6AD31CFB046892E438EE1322 /* Debug */,
 				D8BCE6B26E87112B6AE94007 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		CBCCE9D7987DFCCAE1F34BF8 /* Build configuration list for PBXNativeTarget "VKTurnProxyMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7DA9FF53294D5C29920C23FB /* Debug */,
+				54AE6C15CB47810AB3BC4D16 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

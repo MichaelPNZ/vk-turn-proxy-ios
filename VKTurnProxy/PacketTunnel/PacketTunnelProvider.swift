@@ -544,6 +544,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
             // is async and may return nil if iOS denies our context (e.g.
             // missing entitlement) — we still proceed in either case so
             // path event logging never blocks on the SSID lookup.
+            #if os(iOS)
             if path.usesInterfaceType(Network.NWInterface.InterfaceType.wifi) {
                 NEHotspotNetwork.fetchCurrent { [weak self] network in
                     self?.currentWiFiSSID = network?.ssid
@@ -553,6 +554,10 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
                 self.currentWiFiSSID = nil
                 process()
             }
+            #else
+            self.currentWiFiSSID = nil
+            process()
+            #endif
         }
         monitor.start(queue: pathMonitorQueue)
         pathMonitor = monitor

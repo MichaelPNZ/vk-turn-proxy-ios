@@ -1,6 +1,6 @@
 import Foundation
 import Network
-import NetworkExtension
+@preconcurrency import NetworkExtension
 import UIKit
 
 // MARK: - Tunnel Statistics
@@ -8,6 +8,7 @@ import UIKit
 struct TunnelStats: Codable {
     var txBytes: Int64 = 0
     var rxBytes: Int64 = 0
+    var requestedConns: Int32 = 0
     var activeConns: Int32 = 0
     var totalConns: Int32 = 0
     var turnRTTms: Double = 0
@@ -43,10 +44,13 @@ struct TunnelStats: Codable {
     var tunnelUptimeSec: Int64 = 0
     var captchaImageURL: String?
     var captchaSID: String?
+    var vkLastFetchError: String?
+    var vkLastFetchErrorAt: Int64 = 0
 
     enum CodingKeys: String, CodingKey {
         case txBytes = "tx_bytes"
         case rxBytes = "rx_bytes"
+        case requestedConns = "requested_conns"
         case activeConns = "active_conns"
         case totalConns = "total_conns"
         case turnRTTms = "turn_rtt_ms"
@@ -58,6 +62,23 @@ struct TunnelStats: Codable {
         case tunnelUptimeSec = "tunnel_uptime_sec"
         case captchaImageURL = "captcha_image_url"
         case captchaSID = "captcha_sid"
+        case vkLastFetchError = "vk_last_fetch_error"
+        case vkLastFetchErrorAt = "vk_last_fetch_error_at"
+    }
+}
+
+private final class OneShotCompletion: @unchecked Sendable {
+    private let lock = NSLock()
+    private var completed = false
+
+    func claim() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if completed {
+            return false
+        }
+        completed = true
+        return true
     }
 }
 
@@ -610,7 +631,9 @@ class TunnelManager: ObservableObject {
         // the first one.
         triggerCaptchaRefresh(reason: "initial")
         captchaAutoRefreshTimer = Timer.scheduledTimer(withTimeInterval: captchaRefreshInterval, repeats: true) { [weak self] _ in
-            self?.triggerCaptchaRefresh(reason: "timer")
+            Task { @MainActor in
+                self?.triggerCaptchaRefresh(reason: "timer")
+            }
         }
     }
 
@@ -781,9 +804,9 @@ class TunnelManager: ObservableObject {
             object: manager.connection,
             queue: .main
         ) { [weak self] _ in
+            let newStatus = manager.connection.status
             Task { @MainActor in
                 guard let self = self else { return }
-                let newStatus = manager.connection.status
                 self.debugLog("NEVPNStatus changed: \(newStatus.rawValue) captchaPending=\(self.captchaPending)")
                 self.status = newStatus
                 switch newStatus {
@@ -1063,22 +1086,21 @@ class TunnelManager: ObservableObject {
             using: .tcp
         )
         let queue = DispatchQueue(label: "rtt-ping")
-        var done = false
+        let completion = OneShotCompletion()
         connection.stateUpdateHandler = { [weak self] state in
-            guard !done else { return }
             switch state {
             case .ready:
-                done = true
+                guard completion.claim() else { return }
                 let elapsed = (CFAbsoluteTimeGetCurrent() - start) * 1000
                 connection.cancel()
                 Task { @MainActor in
                     self?.internetRTTms = elapsed
                 }
             case .failed(_):
-                done = true
+                guard completion.claim() else { return }
                 connection.cancel()
             case .cancelled:
-                done = true
+                _ = completion.claim()
             default:
                 break
             }
@@ -1087,8 +1109,7 @@ class TunnelManager: ObservableObject {
 
         // Timeout after 5 seconds
         queue.asyncAfter(deadline: .now() + 5) {
-            if !done {
-                done = true
+            if completion.claim() {
                 connection.cancel()
             }
         }
@@ -1412,7 +1433,7 @@ class TunnelManager: ObservableObject {
     /// is brittle when VK rotates DNS A-records or when an upstream
     /// network path to one specific IP is temporarily unreachable.
     nonisolated private func resolveVKHosts() -> [String: [String]] {
-        let hosts = ["login.vk.ru", "api.vk.ru", "id.vk.ru"]
+        let hosts = ["login.vk.ru", "api.vk.ru", "api.vk.me", "id.vk.ru"]
         var resolved: [String: [String]] = [:]
 
         for host in hosts {
@@ -1543,7 +1564,7 @@ struct TunnelConfig {
     // captchaNotRobot.* solver runs. Set via a `forceLegacyCaptcha` field in
     // the backup JSON (no Settings UI). Default false → no production effect.
     var forceLegacyCaptcha: Bool = false
-    var numConnections: Int = 30 // configurable from Settings; VK allows ~10 simultaneous TURN allocations per cred set, so 30 conns spreads over ceil(N/10) = 3 cred sets plus a "+1 reserve" (4 total slots). 30 strikes a useful balance: enough parallelism for high-throughput single sessions, few enough to avoid overwhelming VK's per-IP rate-limit on cred refresh.
+    var numConnections: Int = 10 // configurable from Settings; vpn-export.log from build 134 showed NumConns=30 produced thousands of cold-start parking retries while only ~10 conns carried traffic. New installs default to one cred-set worth of conns; explicit imported/edited values are preserved.
     // Per-slot cooldown after a failed fetch (typically captcha required).
     // Slot stays in cooldown for this long before being eligible to retry.
     // Shorter = pool recovers faster when VK cools down, longer = less VK

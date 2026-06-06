@@ -24,6 +24,7 @@
 // connect via the normal VK API + PoW path. No UserDefaults changes.
 
 import Foundation
+import VKTurnShared
 
 enum BackupError: Error, LocalizedError {
     case noContainer
@@ -91,7 +92,7 @@ enum BackupManager {
             // unset, but useDTLS defaults to true in @AppStorage. Use
             // object(forKey:) to distinguish "set to false" from "unset".
             useDTLS: (d.object(forKey: "useDTLS") as? Bool) ?? true,
-            numConnections: (d.object(forKey: "numConnections") as? Int) ?? 30,
+            numConnections: (d.object(forKey: "numConnections") as? Int) ?? 10,
             credPoolCooldownSeconds: (d.object(forKey: "credPoolCooldownSeconds") as? Int) ?? 150,
             // WRAP defaults match SettingsView's @AppStorage defaults
             // (false / empty). Same object(forKey:) trick as useDTLS to
@@ -194,6 +195,13 @@ enum BackupManager {
             data = try Data(contentsOf: url)
         } catch {
             throw BackupError.readFailed(error.localizedDescription)
+        }
+
+        guard let rawJson = String(data: data, encoding: .utf8) else {
+            throw BackupError.decodeFailed("Backup file is not valid UTF-8 JSON")
+        }
+        if let sharedValidationError = IosImportValidator.shared.validateFullBackup(rawJson: rawJson) {
+            throw BackupError.decodeFailed("Shared validation failed: \(sharedValidationError)")
         }
 
         let config: AppConfig
@@ -350,6 +358,9 @@ enum BackupManager {
         guard url.scheme?.lowercased() == "vkturnproxy" else {
             throw BackupError.decodeFailed("URL scheme is not vkturnproxy://")
         }
+        if let sharedValidationError = IosImportValidator.shared.validateConnectionLink(raw: url.absoluteString) {
+            throw BackupError.decodeFailed("Shared validation failed: \(sharedValidationError)")
+        }
         // Accept both vkturnproxy://import?data=… and the looser
         // vkturnproxy:?data=… form. URL.host is "import" for the first
         // and nil for the second; both should work.
@@ -369,6 +380,9 @@ enum BackupManager {
     /// bare base64 blob — the user might have copied either form.
     static func parseConnectionLinkString(_ raw: String) throws -> ConnectionLink {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let sharedValidationError = IosImportValidator.shared.validateConnectionLink(raw: trimmed) {
+            throw BackupError.decodeFailed("Shared validation failed: \(sharedValidationError)")
+        }
         if let url = URL(string: trimmed), url.scheme?.lowercased() == "vkturnproxy" {
             return try parseConnectionLink(from: url)
         }

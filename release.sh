@@ -1,86 +1,214 @@
 #!/usr/bin/env bash
-# release.sh — full release pipeline for an already-tagged build.
-#
-# What it does, in order:
-#   1. Sanity-check the environment (clean tree, tag exists, project.yml
-#      build number matches the tag, App Store Connect API key file is
-#      present, gh CLI is authenticated).
-#   2. Build the Go xcframework (WireGuardBridge/Makefile).
-#   3. xcodebuild archive (Release configuration) into
-#      build_output/VKTurnProxy.xcarchive — overwriting any prior archive.
-#   4. xcodebuild -exportArchive with destination=upload to push the
-#      build to TestFlight via the App Store Connect API key.
-#   5. xcodebuild -exportArchive with destination=export to produce a
-#      local VKTurnProxy.ipa under build_output/Export-build<N>/.
-#   6. Attach the IPA to the GitHub Release for <tag>. Creates the
-#      release first (using the tag's own annotation as title + body)
-#      if no release exists yet for that tag; otherwise uploads the IPA
-#      with --clobber to replace any prior asset of the same name.
-#
-# Why two -exportArchive runs (steps 4 and 5)?
-#   xcodebuild's destination=upload uploads the IPA directly to App
-#   Store Connect without leaving it on disk. To attach the same IPA to
-#   a GitHub Release we have to re-export with destination=export. The
-#   archive is the same in both runs, so signing and content match
-#   exactly — only the disposition differs.
+# release.sh — TestFlight + GitHub release pipeline for an already-tagged build.
 #
 # Usage:
-#     ./release.sh <tag>
+#   ./release.sh <tag> [all|ios|macos]
 #
-# Example:
-#     git tag -a v1.0-build35 -m "..."
-#     git push origin v1.0-build35
-#     ./release.sh v1.0-build35
-#
-# Prerequisites checked at startup:
-#   - Git tag <tag> exists locally
-#   - VKTurnProxy/project.yml's CURRENT_PROJECT_VERSION matches <N>
-#     extracted from the tag (everything after the last "build")
-#   - VKTurnProxy/AppStoreConnect.env defines APPSTORE_KEY_ID,
-#     APPSTORE_ISSUER_ID, APPSTORE_KEY_PATH (sourced into env)
-#   - Working tree is clean (no uncommitted changes)
-#   - gh CLI is installed and authenticated for the upstream repo
+# Default target is `all`, which archives/uploads Apple targets and attaches
+# cross-platform release artifacts:
+#   - iOS scheme:   VKTurnProxy
+#   - macOS scheme: VKTurnProxyMac
+#   - Android APK/AAB
+#   - Windows runtime zip
+#   - Optional Windows setup EXE if prebuilt under build/windows-installer/
+#   - Linux server package
 
 set -euo pipefail
 
 TAG="${1:-}"
-if [[ -z "$TAG" ]]; then
+TARGET_SET="${2:-all}"
+if [[ -z "$TAG" || ! "$TARGET_SET" =~ ^(all|ios|macos)$ ]]; then
     cat >&2 <<EOF
-Usage: $0 <tag>
+Usage: $0 <tag> [all|ios|macos]
 
-Example: $0 v1.0-build35
-
-The tag must already exist locally (and ideally also pushed to origin).
-The build number is extracted from the tag suffix after "build".
+Example:
+  git tag -a v1.0-build155 -m "..."
+  git push origin v1.0-build155
+  ./release.sh v1.0-build155 all
 EOF
     exit 64
 fi
 
-# Extract build number — everything after the last "build" in the tag.
-# v1.0-build35 → 35
 BUILD_NUM="${TAG##*build}"
 if [[ ! "$BUILD_NUM" =~ ^[0-9]+$ ]]; then
     echo "ERROR: tag must end with build<N>, got: $TAG" >&2
     exit 64
 fi
 
-# Run from repo root regardless of where the script is invoked from.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
+source "$SCRIPT_DIR/scripts/release-manifest-lib.sh"
 
-# Helpful colour codes for stage banners — falls back to no-colour if
-# stdout isn't a terminal.
 if [[ -t 1 ]]; then
     BOLD=$'\033[1m'; CYAN=$'\033[36m'; GREEN=$'\033[32m'; RED=$'\033[31m'; RESET=$'\033[0m'
 else
     BOLD=""; CYAN=""; GREEN=""; RED=""; RESET=""
 fi
 banner() { printf '\n%s==> %s%s\n' "$BOLD$CYAN" "$*" "$RESET"; }
-ok()     { printf '%s%s%s\n' "$GREEN"          "$*" "$RESET"; }
-fail()   { printf '%s%s%s\n' "$RED"            "$*" "$RESET" >&2; }
+ok()     { printf '%s%s%s\n' "$GREEN" "$*" "$RESET"; }
+fail()   { printf '%s%s%s\n' "$RED" "$*" "$RESET" >&2; }
 
-# ─── Step 1: sanity checks ─────────────────────────────────────────────────
-banner "Verifying environment for $TAG (build $BUILD_NUM)"
+ARTIFACTS=()
+
+add_artifact() {
+    local artifact="$1"
+    if [[ -z "$artifact" || ! -f "$artifact" ]]; then
+        fail "Expected artifact does not exist: ${artifact:-unset}"
+        exit 1
+    fi
+    ARTIFACTS+=("$artifact")
+    local size
+    size="$(stat -f%z "$artifact")"
+    ok "Artifact ready: $artifact ($size bytes)"
+}
+
+TARGETS=()
+case "$TARGET_SET" in
+    all) TARGETS=(ios macos) ;;
+    ios) TARGETS=(ios) ;;
+    macos) TARGETS=(macos) ;;
+esac
+
+require_build_numbers_match_tag() {
+    local mismatches
+    mismatches="$(awk -v expected="$BUILD_NUM" '
+        /^[[:space:]]+CURRENT_PROJECT_VERSION:/ {
+            value=$NF
+            gsub(/"/, "", value)
+            if (value != expected) print NR ":" value
+        }
+    ' VKTurnProxy/project.yml)"
+    if [[ -n "$mismatches" ]]; then
+        fail "project.yml contains CURRENT_PROJECT_VERSION values that do not match tag build $BUILD_NUM:"
+        echo "$mismatches" >&2
+        exit 1
+    fi
+}
+
+make_export_plist() {
+    local destination="$1"
+    local path="$2"
+    cat > "$path" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>method</key>
+	<string>app-store-connect</string>
+	<key>teamID</key>
+	<string>CDMQ33VFQC</string>
+	<key>uploadBitcode</key>
+	<false/>
+	<key>uploadSymbols</key>
+	<true/>
+	<key>destination</key>
+	<string>$destination</string>
+</dict>
+</plist>
+EOF
+}
+
+archive_target() {
+    local platform="$1"
+    local scheme="$2"
+    local archive_path="$3"
+
+    banner "Archiving $platform Release configuration"
+    rm -rf "$archive_path"
+    xcodebuild \
+        -project VKTurnProxy/VKTurnProxy.xcodeproj \
+        -scheme "$scheme" \
+        -destination "generic/platform=$platform" \
+        -configuration Release \
+        -archivePath "$archive_path" \
+        archive \
+        -allowProvisioningUpdates \
+        2>&1 | tail -12
+    ok "$platform archive created at $archive_path"
+}
+
+upload_testflight() {
+    local label="$1"
+    local archive_path="$2"
+    local export_dir="$3"
+
+    banner "Uploading $label to TestFlight"
+    local export_plist
+    export_plist="$(mktemp -t ExportOptions-upload.XXXXXX.plist)"
+    make_export_plist "upload" "$export_plist"
+    rm -rf "$export_dir"
+    xcodebuild -exportArchive \
+        -archivePath "$archive_path" \
+        -exportPath "$export_dir" \
+        -exportOptionsPlist "$export_plist" \
+        -authenticationKeyPath "$APPSTORE_KEY_PATH" \
+        -authenticationKeyID "$APPSTORE_KEY_ID" \
+        -authenticationKeyIssuerID "$APPSTORE_ISSUER_ID" \
+        -allowProvisioningUpdates \
+        2>&1 | tail -12
+    rm -f "$export_plist"
+    ok "$label TestFlight upload submitted."
+}
+
+export_local_artifact() {
+    local label="$1"
+    local archive_path="$2"
+    local export_dir="$3"
+    local fallback_zip_name="$4"
+
+    banner "Exporting local $label artifact"
+    local export_plist
+    export_plist="$(mktemp -t ExportOptions-export.XXXXXX.plist)"
+    make_export_plist "export" "$export_plist"
+    rm -rf "$export_dir"
+    xcodebuild -exportArchive \
+        -archivePath "$archive_path" \
+        -exportPath "$export_dir" \
+        -exportOptionsPlist "$export_plist" \
+        -allowProvisioningUpdates \
+        2>&1 | tail -8
+    rm -f "$export_plist"
+
+    local artifact
+    artifact="$(find "$export_dir" -maxdepth 2 -type f \( -name '*.ipa' -o -name '*.pkg' -o -name '*.zip' \) | head -1 || true)"
+    if [[ -z "$artifact" ]]; then
+        local app_dir
+        app_dir="$(find "$export_dir" -maxdepth 2 -type d -name '*.app' | head -1 || true)"
+        if [[ -n "$app_dir" ]]; then
+            artifact="$export_dir/$fallback_zip_name"
+            ( cd "$(dirname "$app_dir")" && /usr/bin/ditto -c -k --keepParent "$(basename "$app_dir")" "$artifact" )
+        fi
+    fi
+    if [[ -z "$artifact" || ! -f "$artifact" ]]; then
+        fail "Expected local $label artifact under $export_dir but none was found."
+        exit 1
+    fi
+    add_artifact "$artifact"
+}
+
+build_cross_platform_artifacts() {
+    banner "Building cross-platform release artifacts"
+    local package_output
+    package_output="$(ANDROID_HOME="${ANDROID_HOME:-"$HOME/Library/Android/sdk"}" scripts/package-release-artifacts.sh "$TAG")"
+    printf '%s\n' "$package_output"
+    while IFS= read -r artifact; do
+        add_artifact "$artifact"
+    done < <(awk -F= '/^artifact=/{print $2}' <<<"$package_output")
+}
+
+write_checksum_manifest() {
+    banner "Writing release checksum manifest"
+    local dir="build/release"
+    local manifest="$dir/$TAG-sha256.txt"
+    mkdir -p "$dir"
+    : > "$manifest"
+    for artifact in "${ARTIFACTS[@]}"; do
+        release_manifest_write_entry "$SCRIPT_DIR" "$artifact" >> "$manifest"
+    done
+    add_artifact "$manifest"
+}
+
+banner "Verifying environment for $TAG (build $BUILD_NUM, target=$TARGET_SET)"
 
 if [[ -n "$(git status --porcelain)" ]]; then
     fail "Working tree is dirty. Commit or stash before releasing."
@@ -90,17 +218,11 @@ fi
 
 if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
     fail "Tag $TAG does not exist locally."
-    fail "Create it first:  git tag -a $TAG -m '...'  &&  git push origin $TAG"
+    fail "Create it first: git tag -a $TAG -m '...' && git push origin $TAG"
     exit 1
 fi
 
-PROJECT_YML="VKTurnProxy/project.yml"
-PROJ_BUILD=$(awk '/^[[:space:]]+CURRENT_PROJECT_VERSION:/ {print $NF; exit}' "$PROJECT_YML")
-if [[ "$PROJ_BUILD" != "$BUILD_NUM" ]]; then
-    fail "project.yml CURRENT_PROJECT_VERSION = $PROJ_BUILD, but tag build = $BUILD_NUM"
-    fail "Bump project.yml + commit + retag, then re-run."
-    exit 1
-fi
+require_build_numbers_match_tag
 
 ENV_FILE="VKTurnProxy/AppStoreConnect.env"
 if [[ ! -f "$ENV_FILE" ]]; then
@@ -108,7 +230,6 @@ if [[ ! -f "$ENV_FILE" ]]; then
     exit 1
 fi
 
-# Source key paths so we can sanity-check them without leaking values.
 set -a
 # shellcheck disable=SC1090
 source "$ENV_FILE"
@@ -135,118 +256,56 @@ fi
 
 ok "All checks passed."
 
-# ─── Step 2: Go xcframework ────────────────────────────────────────────────
+if [[ "$TARGET_SET" == "all" ]]; then
+    build_cross_platform_artifacts
+fi
+
 banner "Building Go xcframework"
 ( cd WireGuardBridge && make xcframework )
 ok "xcframework built."
 
-# ─── Step 3: archive Release config ────────────────────────────────────────
-banner "Archiving Release configuration"
-ARCHIVE_PATH="VKTurnProxy/build_output/VKTurnProxy.xcarchive"
-rm -rf "$ARCHIVE_PATH"
-xcodebuild \
-    -project VKTurnProxy/VKTurnProxy.xcodeproj \
-    -scheme VKTurnProxy \
-    -destination 'generic/platform=iOS' \
-    -configuration Release \
-    -archivePath "$ARCHIVE_PATH" \
-    archive \
-    -allowProvisioningUpdates \
-    2>&1 | tail -3
-ok "Archive created at $ARCHIVE_PATH"
+IOS_ARCHIVE="VKTurnProxy/build_output/VKTurnProxy-iOS.xcarchive"
+MAC_ARCHIVE="VKTurnProxy/build_output/VKTurnProxy-macOS.xcarchive"
 
-# ─── Step 4: TestFlight upload ─────────────────────────────────────────────
-banner "Uploading to TestFlight (App Store Connect)"
-EXPORT_TF_DIR="VKTurnProxy/build_output/Export-tf$BUILD_NUM"
-rm -rf "$EXPORT_TF_DIR"
-xcodebuild -exportArchive \
-    -archivePath "$ARCHIVE_PATH" \
-    -exportPath "$EXPORT_TF_DIR" \
-    -exportOptionsPlist VKTurnProxy/ExportOptions.plist \
-    -authenticationKeyPath "$APPSTORE_KEY_PATH" \
-    -authenticationKeyID "$APPSTORE_KEY_ID" \
-    -authenticationKeyIssuerID "$APPSTORE_ISSUER_ID" \
-    -allowProvisioningUpdates \
-    2>&1 | tail -8
-ok "TestFlight upload submitted."
+for target in "${TARGETS[@]}"; do
+    case "$target" in
+        ios)
+            archive_target "iOS" "VKTurnProxy" "$IOS_ARCHIVE"
+            upload_testflight "iOS" "$IOS_ARCHIVE" "VKTurnProxy/build_output/Export-iOS-tf$BUILD_NUM"
+            export_local_artifact "iOS" "$IOS_ARCHIVE" "VKTurnProxy/build_output/Export-iOS-build$BUILD_NUM" "VKTurnProxy-iOS.app.zip"
+            ;;
+        macos)
+            archive_target "macOS" "VKTurnProxyMac" "$MAC_ARCHIVE"
+            upload_testflight "macOS" "$MAC_ARCHIVE" "VKTurnProxy/build_output/Export-macOS-tf$BUILD_NUM"
+            export_local_artifact "macOS" "$MAC_ARCHIVE" "VKTurnProxy/build_output/Export-macOS-build$BUILD_NUM" "VKTurnProxyMac.app.zip"
+            ;;
+    esac
+done
 
-# ─── Step 5: local IPA export ──────────────────────────────────────────────
-banner "Exporting local IPA for GitHub Release"
-EXPORT_LOCAL_DIR="VKTurnProxy/build_output/Export-build$BUILD_NUM"
-EXPORT_LOCAL_PLIST=$(mktemp -t ExportOptions-export.XXXXXX.plist)
-trap "rm -f '$EXPORT_LOCAL_PLIST'" EXIT
+write_checksum_manifest
 
-# Same options as VKTurnProxy/ExportOptions.plist but destination=export
-# instead of destination=upload, so xcodebuild leaves the IPA on disk
-# rather than streaming it to App Store Connect.
-cat > "$EXPORT_LOCAL_PLIST" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-	<key>method</key>
-	<string>app-store-connect</string>
-	<key>teamID</key>
-	<string>CDMQ33VFQC</string>
-	<key>uploadBitcode</key>
-	<false/>
-	<key>uploadSymbols</key>
-	<true/>
-	<key>destination</key>
-	<string>export</string>
-</dict>
-</plist>
-EOF
-
-rm -rf "$EXPORT_LOCAL_DIR"
-xcodebuild -exportArchive \
-    -archivePath "$ARCHIVE_PATH" \
-    -exportPath "$EXPORT_LOCAL_DIR" \
-    -exportOptionsPlist "$EXPORT_LOCAL_PLIST" \
-    -allowProvisioningUpdates \
-    2>&1 | tail -3
-
-IPA_PATH="$EXPORT_LOCAL_DIR/VKTurnProxy.ipa"
-if [[ ! -f "$IPA_PATH" ]]; then
-    fail "Expected IPA at $IPA_PATH but file not found."
-    exit 1
-fi
-IPA_SIZE=$(stat -f%z "$IPA_PATH")
-ok "IPA exported: $IPA_PATH ($IPA_SIZE bytes)"
-
-# ─── Step 6: GitHub Release ────────────────────────────────────────────────
-banner "Attaching IPA to GitHub Release $TAG"
-
+banner "Attaching artifacts to GitHub Release $TAG"
 if gh release view "$TAG" >/dev/null 2>&1; then
-    echo "Release $TAG already exists; uploading IPA (--clobber overwrites prior asset of same name)"
-    gh release upload "$TAG" "$IPA_PATH" --clobber
+    echo "Release $TAG already exists; uploading artifacts with --clobber"
+    gh release upload "$TAG" "${ARTIFACTS[@]}" --clobber
 else
-    # Use the tag's annotated subject as release title and its body as
-    # the release notes. Falls back to a sensible default if the tag is
-    # lightweight (no annotation).
-    TAG_SUBJECT=$(git tag -l --format='%(contents:subject)' "$TAG")
-    TAG_BODY=$(git tag -l --format='%(contents:body)' "$TAG")
-    if [[ -z "$TAG_SUBJECT" ]]; then
-        TAG_SUBJECT="$TAG"
-    fi
-    if [[ -z "$TAG_BODY" ]]; then
-        TAG_BODY="Build $BUILD_NUM artifacts."
-    fi
-    echo "Creating release $TAG with title from tag annotation"
-    gh release create "$TAG" "$IPA_PATH" \
+    TAG_SUBJECT="$(git tag -l --format='%(contents:subject)' "$TAG")"
+    TAG_BODY="$(git tag -l --format='%(contents:body)' "$TAG")"
+    [[ -n "$TAG_SUBJECT" ]] || TAG_SUBJECT="$TAG"
+    [[ -n "$TAG_BODY" ]] || TAG_BODY="Build $BUILD_NUM artifacts."
+    gh release create "$TAG" "${ARTIFACTS[@]}" \
         --title "$TAG_SUBJECT" \
         --notes "$TAG_BODY"
 fi
-
 ok "GitHub Release ready."
 
-# ─── Summary ───────────────────────────────────────────────────────────────
-RELEASE_URL=$(gh release view "$TAG" --json url -q .url 2>/dev/null || echo "")
+RELEASE_URL="$(gh release view "$TAG" --json url -q .url 2>/dev/null || echo "")"
 banner "Release pipeline complete"
 cat <<EOF
-  Tag:         $TAG (build $BUILD_NUM)
-  Archive:     $ARCHIVE_PATH
-  IPA:         $IPA_PATH ($IPA_SIZE bytes)
-  TestFlight:  uploaded — check App Store Connect for processing status
-  GitHub:      $RELEASE_URL
+  Tag:        $TAG (build $BUILD_NUM)
+  Targets:    ${TARGETS[*]}
+  Artifacts:
+$(printf '    - %s\n' "${ARTIFACTS[@]}")
+  TestFlight: uploaded — check App Store Connect for processing status
+  GitHub:     $RELEASE_URL
 EOF

@@ -1,0 +1,7 @@
+# Copy to androidApp/signing.properties for signed release builds.
+# Do not commit androidApp/signing.properties or the keystore.
+
+storeFile=/absolute/path/to/vk-turn-proxy-release.jks
+storePassword=
+keyAlias=vk-turn-proxy-release
+keyPassword=
