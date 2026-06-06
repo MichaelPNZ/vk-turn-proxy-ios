@@ -208,11 +208,6 @@ if [[ ! "$TAG" =~ build[0-9]+$ ]]; then
 fi
 BUILD_NUM="${TAG##*build}"
 
-if [[ ! "$TAG" =~ build[0-9]+$ ]]; then
-  echo "ERROR: tag must end with build<N>, got: $TAG" >&2
-  exit 64
-fi
-
 cd "$ROOT_DIR"
 
 printf 'Final release readiness for %s\n' "$ROOT_DIR"

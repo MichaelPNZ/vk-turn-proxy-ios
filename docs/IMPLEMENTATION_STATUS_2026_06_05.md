@@ -1173,6 +1173,15 @@ Verification:
 - Android wrapper exits `64` with instructions when neither `PROFILE_FILE` nor `IMPORT_LINK` is set;
 - final release readiness remains `0 failure(s), 6 warning(s)` with external blockers allowed.
 
+GitHub Actions CI:
+
+- Added `.github/workflows/release-gates.yml` for the fork.
+- Runs on `main`, release tags matching `v*build*`, pull requests, and manual dispatch.
+- Uses a macOS runner so Xcode/TestFlight preflight tooling is present.
+- Creates an ephemeral Android signing key only for CI package verification; real release signing still uses local/private `androidApp/signing.properties`.
+- Runs shell/package safety tests, Go tests, Gradle shared/Android/Desktop builds, non-Apple release packaging, unsigned Apple Release build gate, external smoke kit generation, and final readiness with external blockers downgraded to warnings.
+- Uploads CI artifacts: APK, AAB, Windows runtime ZIP, Linux server package, checksum manifest, and external smoke kit.
+
 ## Next Implementation Steps
 
 1. Run physical iPhone smoke with Network Extension, because simulator cannot prove tunnel behavior.

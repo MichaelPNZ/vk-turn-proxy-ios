@@ -1,0 +1,146 @@
+name: Release Gates
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*build*"
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  non-apple-and-release-gates:
+    name: Non-Apple Artifacts + Release Gates
+    runs-on: macos-latest
+    timeout-minutes: 90
+
+    env:
+      ANDROID_HOME: /Users/runner/Library/Android/sdk
+      CI_ANDROID_STORE_PASSWORD: ci-android-store-password
+      CI_ANDROID_KEY_PASSWORD: ci-android-key-password
+      CI_ANDROID_KEY_ALIAS: vk-turn-proxy-ci
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Select release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "${GITHUB_REF_NAME:-}" =~ build[0-9]+$ ]]; then
+            tag="$GITHUB_REF_NAME"
+          else
+            tag="v1.0-build156"
+          fi
+          echo "TAG=$tag" >> "$GITHUB_ENV"
+          echo "Using TAG=$tag"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            WireGuardBridge/go.sum
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Apple build tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew list xcodegen >/dev/null 2>&1 || brew install xcodegen
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Create ephemeral CI Android signing key
+        shell: bash
+        run: |
+          set -euo pipefail
+          keytool -genkeypair \
+            -keystore androidApp/ci-release.jks \
+            -storepass "$CI_ANDROID_STORE_PASSWORD" \
+            -keypass "$CI_ANDROID_KEY_PASSWORD" \
+            -alias "$CI_ANDROID_KEY_ALIAS" \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 3650 \
+            -dname "CN=VK Turn Proxy CI,O=VK Turn Proxy,C=US"
+          cat > androidApp/signing.properties <<EOF
+          storeFile=ci-release.jks
+          storePassword=$CI_ANDROID_STORE_PASSWORD
+          keyAlias=$CI_ANDROID_KEY_ALIAS
+          keyPassword=$CI_ANDROID_KEY_PASSWORD
+          EOF
+
+      - name: Shell and manifest tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          for script in release.sh scripts/*.sh; do
+            bash -n "$script"
+          done
+          scripts/test-release-manifest-format.sh
+          scripts/test-server-deploy-safety.sh
+          TAG="$TAG" scripts/test-external-smoke-kit.sh
+          scripts/test-windows-installer-packaging.sh
+
+      - name: Go tests
+        shell: bash
+        run: go test ./...
+
+      - name: Gradle non-Apple builds
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew \
+            :shared:allTests \
+            :androidApp:assembleDebug \
+            :androidApp:assembleRelease \
+            :androidApp:bundleRelease \
+            :desktopApp:build
+
+      - name: Package release artifacts
+        shell: bash
+        run: scripts/package-release-artifacts.sh "$TAG"
+
+      - name: Build unsigned Apple Release targets
+        shell: bash
+        run: scripts/build-apple-release-local.sh all
+
+      - name: Prepare external smoke kit
+        shell: bash
+        run: scripts/prepare-external-smoke-kit.sh "$TAG"
+
+      - name: Final readiness with external blockers as warnings
+        shell: bash
+        run: ALLOW_EXTERNAL_BLOCKERS=1 scripts/final-release-readiness.sh "$TAG"
+
+      - name: Upload CI artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: vk-turn-proxy-${{ env.TAG }}-ci-artifacts
+          if-no-files-found: error
+          path: |
+            androidApp/build/outputs/apk/release/androidApp-release.apk
+            androidApp/build/outputs/bundle/release/androidApp-release.aab
+            build/windows-package/vk-turn-proxy-windows-runtime.zip
+            build/server/vk-turn-proxy-server-${{ env.TAG }}-linux-amd64.tar.gz
+            build/release/${{ env.TAG }}-cross-platform-sha256.txt
+            build/external-smoke-kit/${{ env.TAG }}/
