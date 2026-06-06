@@ -18,7 +18,7 @@ jobs:
     env:
       ANDROID_HOME: /Users/runner/Library/Android/sdk
       CI_ANDROID_STORE_PASSWORD: ci-android-store-password
-      CI_ANDROID_KEY_PASSWORD: ci-android-key-password
+      CI_ANDROID_KEY_PASSWORD: ci-android-store-password
       CI_ANDROID_KEY_ALIAS: vk-turn-proxy-ci
 
     steps:
@@ -88,6 +88,10 @@ jobs:
             printf 'keyAlias=%s\n' "$CI_ANDROID_KEY_ALIAS"
             printf 'keyPassword=%s\n' "$CI_ANDROID_KEY_PASSWORD"
           } > androidApp/signing.properties
+          keytool -list \
+            -keystore androidApp/ci-release.jks \
+            -storepass "$CI_ANDROID_STORE_PASSWORD" \
+            -alias "$CI_ANDROID_KEY_ALIAS" >/dev/null
 
       - name: Shell and manifest tests
         shell: bash
