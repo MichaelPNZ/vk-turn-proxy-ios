@@ -36,4 +36,17 @@ if ! grep -q 'refusing dry-run on production port 56004' "$dry_err"; then
   exit 1
 fi
 
+if ! grep -q 'automatically rolls back if post-promote health fails' "$ROOT_DIR/scripts/deploy-server-vps.sh"; then
+  echo "Promote mode usage does not document automatic rollback." >&2
+  exit 1
+fi
+if ! grep -q 'post-promote health failed; rolling back' "$ROOT_DIR/scripts/deploy-server-vps.sh"; then
+  echo "Promote path does not include post-promote health auto-rollback." >&2
+  exit 1
+fi
+if ! grep -q 'after-auto-rollback' "$ROOT_DIR/scripts/deploy-server-vps.sh"; then
+  echo "Promote path does not write after-auto-rollback evidence." >&2
+  exit 1
+fi
+
 printf 'server deploy safety ok\n'

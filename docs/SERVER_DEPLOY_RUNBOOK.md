@@ -187,7 +187,11 @@ Fresh read-only production baseline on 2026-06-07:
 
 ## Promote
 
-Promote backs up the current binary/unit/env/logrotate, installs the staged binary and service files, restarts systemd, and checks local health.
+Promote backs up the current binary/unit/env/logrotate, installs the staged
+binary and service files, restarts systemd, and checks local health. If
+post-promote health fails, the deploy script automatically restores the same
+backup, restarts the old service, and writes rollback evidence before exiting
+non-zero.
 
 ```bash
 CONFIRM_PRODUCTION_PROMOTE=142.252.220.91:56004 \
@@ -204,6 +208,12 @@ Expected:
 - `http://127.0.0.1:56080/readyz` returns `ready`
 - promote output prints `promoted_backup=/var/backups/vk-turn-proxy-ios/<timestamp>`
 - backup directory contains `before-promote.txt` and `after-promote.txt` with sha256, systemd status, and listener evidence
+
+Failure behavior:
+
+- failed post-promote health writes `failed-promote.txt`
+- automatic rollback writes `after-auto-rollback.txt`
+- stderr prints `auto_rolled_back_from=/var/backups/vk-turn-proxy-ios/<timestamp>`
 
 After the production-port client smoke passes, copy the promote backup evidence,
 production-port client smoke logs, and rollback timestamp into an evidence

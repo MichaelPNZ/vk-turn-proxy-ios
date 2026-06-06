@@ -39,7 +39,8 @@ Modes:
   dry-run        Uploads package and runs the new binary on localhost-only ports.
   install-staged Uploads binary/unit/env/logrotate to staging paths, does not restart production.
   promote        Requires CONFIRM_PRODUCTION_PROMOTE=$HOST:56004, backs up current production files,
-                 installs staged binary/unit/logrotate, restarts service, checks health.
+                 installs staged binary/unit/logrotate, restarts service, checks health,
+                 and automatically rolls back if post-promote health fails.
   rollback       Restores the latest backup made by promote and restarts service.
 EOF
 }
@@ -193,9 +194,25 @@ promote() {
   ssh_root "install -m 0644 '/tmp/vk-turn-proxy-ios.logrotate.next' '$LOGROTATE_PATH'"
   ssh_root "systemctl daemon-reload && systemctl restart '$SERVICE_NAME'"
   sleep 3
-  ssh_root "systemctl is-active --quiet '$SERVICE_NAME' && curl -fsS http://127.0.0.1:56080/healthz && curl -fsS http://127.0.0.1:56080/readyz"
+  if ! ssh_root "systemctl is-active --quiet '$SERVICE_NAME' && curl -fsS http://127.0.0.1:56080/healthz && curl -fsS http://127.0.0.1:56080/readyz"; then
+    echo "ERROR: post-promote health failed; rolling back from $REMOTE_BACKUP_DIR/$stamp" >&2
+    write_remote_evidence "$REMOTE_BACKUP_DIR/$stamp" "failed-promote"
+    restore_backup "$REMOTE_BACKUP_DIR/$stamp"
+    write_remote_evidence "$REMOTE_BACKUP_DIR/$stamp" "after-auto-rollback"
+    echo "auto_rolled_back_from=$REMOTE_BACKUP_DIR/$stamp" >&2
+    exit 1
+  fi
   write_remote_evidence "$REMOTE_BACKUP_DIR/$stamp" "after-promote"
   echo "promoted_backup=$REMOTE_BACKUP_DIR/$stamp"
+}
+
+restore_backup() {
+  local backup_dir="$1"
+  ssh_root "test -f '$backup_dir/vk-turn-proxy-server' && install -m 0755 '$backup_dir/vk-turn-proxy-server' '$PROD_BINARY'"
+  ssh_root "test -f '$backup_dir/vk-turn-proxy-ios.service' && install -m 0644 '$backup_dir/vk-turn-proxy-ios.service' '$UNIT_PATH'"
+  ssh_root "test -f '$backup_dir/vk-turn-proxy-ios.env' && install -m 0644 '$backup_dir/vk-turn-proxy-ios.env' '$ENV_PATH' || true"
+  ssh_root "test -f '$backup_dir/vk-turn-proxy-ios.logrotate' && install -m 0644 '$backup_dir/vk-turn-proxy-ios.logrotate' '$LOGROTATE_PATH' || true"
+  ssh_root "systemctl daemon-reload && systemctl restart '$SERVICE_NAME' && systemctl is-active --quiet '$SERVICE_NAME'"
 }
 
 rollback() {
@@ -205,11 +222,7 @@ rollback() {
     echo "No backup found under $REMOTE_BACKUP_DIR" >&2
     exit 1
   fi
-  ssh_root "test -f '$latest/vk-turn-proxy-server' && install -m 0755 '$latest/vk-turn-proxy-server' '$PROD_BINARY'"
-  ssh_root "test -f '$latest/vk-turn-proxy-ios.service' && install -m 0644 '$latest/vk-turn-proxy-ios.service' '$UNIT_PATH'"
-  ssh_root "test -f '$latest/vk-turn-proxy-ios.env' && install -m 0644 '$latest/vk-turn-proxy-ios.env' '$ENV_PATH' || true"
-  ssh_root "test -f '$latest/vk-turn-proxy-ios.logrotate' && install -m 0644 '$latest/vk-turn-proxy-ios.logrotate' '$LOGROTATE_PATH' || true"
-  ssh_root "systemctl daemon-reload && systemctl restart '$SERVICE_NAME' && systemctl is-active --quiet '$SERVICE_NAME'"
+  restore_backup "$latest"
   echo "rolled_back_from=$latest"
 }
 

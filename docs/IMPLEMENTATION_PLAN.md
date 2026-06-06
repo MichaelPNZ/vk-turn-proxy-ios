@@ -156,6 +156,9 @@ Current verification:
   - `MODE=promote` requires `CONFIRM_PRODUCTION_PROMOTE=142.252.220.91:56004`;
   - `MODE=dry-run` refuses `DRY_LISTEN` on production port `56004`;
   - promote writes `before-promote.txt` and `after-promote.txt` into the backup directory.
+- Promote now automatically restores the same backup if post-promote
+  systemd/`/healthz`/`/readyz` checks fail, writes `failed-promote.txt` and
+  `after-auto-rollback.txt`, then exits non-zero.
 - `scripts/test-server-deploy-safety.sh` verifies the production promote and dry-run guards locally.
 - `scripts/final-release-readiness.sh <tag>` requires production-port smoke evidence before final release readiness can pass.
 - `scripts/prepare-external-smoke-kit.sh <tag>` creates a no-secrets handoff kit under `build/external-smoke-kit/<tag>/` with external smoke commands/templates and final readiness env placeholders.
