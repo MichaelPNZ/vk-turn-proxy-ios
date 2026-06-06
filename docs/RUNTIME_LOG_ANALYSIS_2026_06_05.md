@@ -220,3 +220,7 @@ Remaining:
   false-positive or network-wide post-wake probe failure; skipped connections
   remain covered by the normal timer-based zombie detector and later wakes.
 - Added unit coverage for wake-probe limit sizing and semaphore behavior.
+- Added compact goroutine summaries to `StopWithTimeout` timeout logs:
+  - summary includes total goroutines, runtime states, and top stack frames;
+  - keeps the exported VPN log compact while making shutdown timeouts
+    actionable in the next iPhone/macOS smoke.

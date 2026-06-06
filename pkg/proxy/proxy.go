@@ -1836,9 +1836,97 @@ func (p *Proxy) StopWithTimeout(timeout time.Duration) {
 	case <-done:
 		// clean exit — every goroutine returned within budget
 	case <-time.After(timeout):
-		log.Printf("proxy: StopWithTimeout — %s elapsed, %d goroutines still alive (returning anyway, runtime exit will reap them)",
-			timeout.Round(time.Millisecond), runtime.NumGoroutine())
+		log.Printf("proxy: StopWithTimeout — %s elapsed, %d goroutines still alive (returning anyway, runtime exit will reap them); %s",
+			timeout.Round(time.Millisecond), runtime.NumGoroutine(), captureGoroutineSummary(256*1024, 8))
 	}
+}
+
+func captureGoroutineSummary(maxBytes int, maxGroups int) string {
+	if maxBytes < 4096 {
+		maxBytes = 4096
+	}
+	buf := make([]byte, maxBytes)
+	n := runtime.Stack(buf, true)
+	summary := summarizeGoroutineStacks(string(buf[:n]), maxGroups)
+	if n == len(buf) {
+		summary += " truncated=true"
+	}
+	return summary
+}
+
+func summarizeGoroutineStacks(dump string, maxGroups int) string {
+	if maxGroups <= 0 {
+		maxGroups = 5
+	}
+	stateCounts := map[string]int{}
+	topCounts := map[string]int{}
+	total := 0
+
+	for _, block := range strings.Split(strings.TrimSpace(dump), "\n\n") {
+		lines := strings.Split(block, "\n")
+		if len(lines) == 0 || !strings.HasPrefix(lines[0], "goroutine ") {
+			continue
+		}
+		total++
+		stateCounts[goroutineStateFromHeader(lines[0])]++
+		topCounts[firstGoroutineFrame(lines)]++
+	}
+
+	return fmt.Sprintf("goroutine-summary total=%d states=%s top=%s",
+		total, formatCountMap(stateCounts, maxGroups), formatCountMap(topCounts, maxGroups))
+}
+
+func goroutineStateFromHeader(header string) string {
+	start := strings.Index(header, "[")
+	end := strings.Index(header, "]")
+	if start < 0 || end <= start+1 {
+		return "unknown"
+	}
+	return header[start+1 : end]
+}
+
+func firstGoroutineFrame(lines []string) string {
+	for _, line := range lines[1:] {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "/") || strings.HasPrefix(line, "\t") {
+			continue
+		}
+		if idx := strings.LastIndex(line, "("); idx > 0 {
+			line = line[:idx]
+		}
+		if line != "" {
+			return line
+		}
+	}
+	return "unknown"
+}
+
+func formatCountMap(counts map[string]int, limit int) string {
+	if len(counts) == 0 {
+		return "none"
+	}
+	type entry struct {
+		name  string
+		count int
+	}
+	entries := make([]entry, 0, len(counts))
+	for name, count := range counts {
+		entries = append(entries, entry{name: name, count: count})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].count == entries[j].count {
+			return entries[i].name < entries[j].name
+		}
+		return entries[i].count > entries[j].count
+	})
+	if limit > 0 && len(entries) > limit {
+		entries = entries[:limit]
+	}
+	parts := make([]string, 0, len(entries))
+	for _, item := range entries {
+		parts = append(parts, fmt.Sprintf("%s:%d", item.name, item.count))
+	}
+	return strings.Join(parts, ",")
 }
 
 // runConnection runs a single connection slot with reconnection.
