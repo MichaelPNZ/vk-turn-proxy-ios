@@ -282,6 +282,22 @@ func isProbePacket(buf []byte) bool {
 }
 
 func startHealthServer(ctx context.Context, listen, connect string, m *metrics) {
+	server := &http.Server{Addr: listen, Handler: newHealthMux(connect, m)}
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = server.Shutdown(shutdownCtx)
+	}()
+	go func() {
+		log.Printf("admin health server listening on %s", listen)
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("admin health server: %v", err)
+		}
+	}()
+}
+
+func newHealthMux(connect string, m *metrics) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -311,20 +327,7 @@ func startHealthServer(ctx context.Context, listen, connect string, m *metrics) 
 		writeMetric(w, "vk_turn_proxy_tx_bytes_total", m.txBytes.Load())
 		writeMetric(w, "vk_turn_proxy_last_activity_unix", m.lastActivityUnix.Load())
 	})
-
-	server := &http.Server{Addr: listen, Handler: mux}
-	go func() {
-		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = server.Shutdown(shutdownCtx)
-	}()
-	go func() {
-		log.Printf("admin health server listening on %s", listen)
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Printf("admin health server: %v", err)
-		}
-	}()
+	return mux
 }
 
 func writeMetric(w io.Writer, name string, value int64) {
