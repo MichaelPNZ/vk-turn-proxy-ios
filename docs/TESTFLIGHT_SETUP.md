@@ -114,6 +114,28 @@ Add these GitHub repository secrets before running it:
 - `APPSTORE_ISSUER_ID`
 - `APPSTORE_CONNECT_API_KEY_P8_BASE64`
 
+The safer one-command path is:
+
+```bash
+scripts/configure-github-testflight-secrets.sh \
+  --cert-p12 /absolute/path/AppleDistribution.p12 \
+  --cert-password '<p12 password>' \
+  --profile /absolute/path/com.vkturnproxy.app.mobileprovision \
+  --profile /absolute/path/com.vkturnproxy.app.tunnel.mobileprovision \
+  --profile /absolute/path/com.vkturnproxy.mac.provisionprofile \
+  --profile /absolute/path/com.vkturnproxy.mac.tunnel.provisionprofile \
+  --appstore-key-id ABCDE12345 \
+  --appstore-issuer-id 00000000-0000-0000-0000-000000000000 \
+  --appstore-key-p8 /absolute/path/AuthKey_ABCDE12345.p8
+```
+
+The helper validates inputs, creates temporary base64 payload files, writes the
+six GitHub secrets with `gh secret set`, and removes the temporary payloads. It
+does not print secret values. Use `DRY_RUN=1` to validate inputs and print only
+secret names/sizes without writing repository secrets.
+
+Manual setup is also possible:
+
 Encode the signing assets without printing secret contents:
 
 ```bash

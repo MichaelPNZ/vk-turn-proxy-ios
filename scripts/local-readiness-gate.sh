@@ -42,6 +42,7 @@ check_shell_syntax \
   scripts/configure-testflight-env.sh \
   scripts/collect-apple-signing-evidence.sh \
   scripts/collect-apple-smoke-evidence.sh \
+  scripts/configure-github-testflight-secrets.sh \
   scripts/collect-server-production-evidence.sh \
   scripts/diagnose-apple-signing.sh \
   scripts/build-windows-service.sh \
