@@ -4,7 +4,23 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TAG="${TAG:-v1.0-build156}"
 OUT_DIR="$(mktemp -d "$ROOT_DIR/build/test-external-smoke-kit-$TAG.XXXXXX")"
-trap 'rm -rf "$OUT_DIR"' EXIT
+MANIFEST="$ROOT_DIR/build/release/$TAG-cross-platform-sha256.txt"
+created_manifest=0
+cleanup() {
+  rm -rf "$OUT_DIR"
+  if [[ "$created_manifest" == "1" ]]; then
+    rm -f "$MANIFEST"
+  fi
+}
+trap cleanup EXIT
+
+if [[ ! -f "$MANIFEST" ]]; then
+  mkdir -p "$(dirname "$MANIFEST")"
+  {
+    printf 'fixture-sha256  fixture-artifact\n'
+  } > "$MANIFEST"
+  created_manifest=1
+fi
 
 "$ROOT_DIR/scripts/prepare-external-smoke-kit.sh" "$TAG" "$OUT_DIR" >/dev/null
 

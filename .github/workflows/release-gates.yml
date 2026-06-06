@@ -82,12 +82,12 @@ jobs:
             -keysize 2048 \
             -validity 3650 \
             -dname "CN=VK Turn Proxy CI,O=VK Turn Proxy,C=US"
-          cat > androidApp/signing.properties <<EOF
-          storeFile=ci-release.jks
-          storePassword=$CI_ANDROID_STORE_PASSWORD
-          keyAlias=$CI_ANDROID_KEY_ALIAS
-          keyPassword=$CI_ANDROID_KEY_PASSWORD
-          EOF
+          {
+            printf 'storeFile=ci-release.jks\n'
+            printf 'storePassword=%s\n' "$CI_ANDROID_STORE_PASSWORD"
+            printf 'keyAlias=%s\n' "$CI_ANDROID_KEY_ALIAS"
+            printf 'keyPassword=%s\n' "$CI_ANDROID_KEY_PASSWORD"
+          } > androidApp/signing.properties
 
       - name: Shell and manifest tests
         shell: bash
