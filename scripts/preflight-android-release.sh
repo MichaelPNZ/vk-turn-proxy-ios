@@ -59,7 +59,17 @@ if [[ -f "$SIGNING_FILE" ]]; then
       external_blocker "signing.properties missing $key"
     fi
   done
-  if [[ -n "$store_file" && -f "$store_file" ]]; then
+  store_path=""
+  if [[ -n "$store_file" ]]; then
+    if [[ "$store_file" = /* ]]; then
+      store_path="$store_file"
+    elif [[ -f "$ROOT_DIR/$store_file" ]]; then
+      store_path="$ROOT_DIR/$store_file"
+    else
+      store_path="$ROOT_DIR/androidApp/$store_file"
+    fi
+  fi
+  if [[ -n "$store_path" && -f "$store_path" ]]; then
     pass "Android release keystore exists"
   else
     external_blocker "Android release keystore missing: ${store_file:-unset}"
