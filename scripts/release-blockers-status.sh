@@ -124,6 +124,35 @@ check_github() {
       write_status github blocked "ci_artifact_expired size=$artifact_size"
     fi
   fi
+
+  if gh workflow view "TestFlight Release" --repo MichaelPNZ/vk-turn-proxy-ios >/dev/null 2>&1; then
+    write_status github ready "testflight_workflow_registered"
+  else
+    write_status github blocked "testflight_workflow_missing"
+  fi
+
+  local secrets missing_secret missing_count
+  secrets="$(gh secret list --repo MichaelPNZ/vk-turn-proxy-ios --json name --jq '.[].name' 2>/dev/null || true)"
+  missing_count=0
+  for required_secret in \
+    APPLE_DISTRIBUTION_CERT_P12_BASE64 \
+    APPLE_DISTRIBUTION_CERT_PASSWORD \
+    APPLE_PROVISIONING_PROFILES_BASE64 \
+    APPSTORE_KEY_ID \
+    APPSTORE_ISSUER_ID \
+    APPSTORE_CONNECT_API_KEY_P8_BASE64; do
+    if grep -q "^$required_secret$" <<<"$secrets"; then
+      :
+    else
+      missing_count=$((missing_count + 1))
+      missing_secret="${missing_secret:-}${missing_secret:+,}$required_secret"
+    fi
+  done
+  if [[ "$missing_count" -eq 0 ]]; then
+    write_status github ready "testflight_secrets_present"
+  else
+    write_status github blocked "testflight_secrets_missing count=$missing_count names=$missing_secret"
+  fi
 }
 
 check_android_physical() {

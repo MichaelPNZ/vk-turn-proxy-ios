@@ -159,7 +159,7 @@ Current verification:
 - `scripts/test-server-deploy-safety.sh` verifies the production promote and dry-run guards locally.
 - `scripts/final-release-readiness.sh <tag>` requires production-port smoke evidence before final release readiness can pass.
 - `scripts/prepare-external-smoke-kit.sh <tag>` creates a no-secrets handoff kit under `build/external-smoke-kit/<tag>/` with external smoke commands/templates and final readiness env placeholders.
-- `scripts/release-blockers-status.sh <tag>` produces a read-only readiness snapshot under `build/release-status/<tag>/` with current GitHub CI, Android physical-device, Apple signing/TestFlight, Windows, and production-server blocker status.
+- `scripts/release-blockers-status.sh <tag>` produces a read-only readiness snapshot under `build/release-status/<tag>/` with current GitHub CI/artifact, TestFlight workflow/secrets, Android physical-device, Apple signing/TestFlight, Windows, and production-server blocker status.
 
 Remaining:
 
