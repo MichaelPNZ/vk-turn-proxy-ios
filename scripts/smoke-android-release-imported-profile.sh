@@ -18,6 +18,9 @@ PREPARE_IMPORT_ONLY="${PREPARE_IMPORT_ONLY:-0}"
 EVIDENCE_DIR="${EVIDENCE_DIR:-}"
 REQUIRE_PHYSICAL_DEVICE="${REQUIRE_PHYSICAL_DEVICE:-0}"
 source_label=""
+wireguard_attached_observed=0
+vpn_network_observed=0
+vpn_stop_cleaned=0
 
 timestamp() {
   date -u +"%Y-%m-%dT%H-%M-%SZ"
@@ -30,12 +33,39 @@ ensure_evidence_dir() {
   mkdir -p "$EVIDENCE_DIR"
 }
 
+one_line_file() {
+  local path="$1"
+  if [[ -f "$path" ]]; then
+    tr -d '\r' < "$path" | head -1 | sed 's/[[:cntrl:]]//g'
+  fi
+}
+
+attachment_count() {
+  find "$EVIDENCE_DIR" -maxdepth 1 -type f ! -name summary.txt | wc -l | tr -d ' '
+}
+
+evidence_type() {
+  if [[ "$REQUIRE_PHYSICAL_DEVICE" == "1" ]]; then
+    printf 'android_physical_smoke\n'
+  else
+    printf 'android_release_smoke\n'
+  fi
+}
+
 write_summary() {
   local result="$1"
   local reason="${2:-}"
   ensure_evidence_dir
+  local device_qemu
+  local device_model
+  local android_version
+  device_qemu="$(one_line_file "$EVIDENCE_DIR/device-qemu.txt")"
+  device_model="$(one_line_file "$EVIDENCE_DIR/device-model.txt")"
+  android_version="$(one_line_file "$EVIDENCE_DIR/device-android-version.txt")"
   {
     printf 'result=%s\n' "$result"
+    printf 'evidence_type=%s\n' "$(evidence_type)"
+    printf 'attachment_count=%s\n' "$(attachment_count)"
     printf 'reason=%s\n' "$reason"
     printf 'timestamp=%s\n' "$(timestamp)"
     printf 'package=%s\n' "$PACKAGE"
@@ -44,6 +74,12 @@ write_summary() {
     printf 'profile_file_set=%s\n' "$([[ -n "$PROFILE_FILE" ]] && echo true || echo false)"
     printf 'import_link_set=%s\n' "$([[ -n "$IMPORT_LINK" ]] && echo true || echo false)"
     printf 'require_physical_device=%s\n' "$REQUIRE_PHYSICAL_DEVICE"
+    [[ -n "$device_qemu" ]] && printf 'device_qemu=%s\n' "$device_qemu"
+    [[ -n "$device_model" ]] && printf 'device_model=%s\n' "$device_model"
+    [[ -n "$android_version" ]] && printf 'android_version=%s\n' "$android_version"
+    printf 'wireguard_attached_observed=%s\n' "$wireguard_attached_observed"
+    printf 'vpn_network_observed=%s\n' "$vpn_network_observed"
+    printf 'vpn_stop_cleaned=%s\n' "$vpn_stop_cleaned"
     printf 'link_bytes=%d\n' "${#link}"
     if [[ -f "$APK" ]]; then
       printf 'apk=%s\n' "$APK"
@@ -331,6 +367,7 @@ if [[ "$attached" != 1 ]]; then
   tail -120 "$EVIDENCE_DIR/failure-logcat-filtered.txt" >&2 || true
   fail_smoke "Android release imported-profile smoke failed: WireGuard attach not observed."
 fi
+wireguard_attached_observed=1
 
 if adb_cmd logcat -d | grep -Eqi "FATAL EXCEPTION|WireGuard attach failed|CreateTUNFromFile failed|IpcSet failed"; then
   adb_cmd logcat -d | grep -Ei "FATAL EXCEPTION|WireGuard attach failed|CreateTUNFromFile failed|IpcSet failed" > "$EVIDENCE_DIR/error-markers.txt" || true
@@ -342,6 +379,7 @@ if ! adb_cmd shell dumpsys connectivity | grep -q "VPN:$PACKAGE"; then
   save_connectivity "missing-vpn-connectivity.txt"
   fail_smoke "Android release imported-profile smoke failed: VPN network not found in connectivity dump."
 fi
+vpn_network_observed=1
 save_connectivity "running-connectivity.txt"
 save_filtered_logcat "running-logcat-filtered.txt"
 save_ui_dump "running-ui.xml"
@@ -353,6 +391,7 @@ if adb_cmd shell dumpsys connectivity | grep -q "VPN:$PACKAGE"; then
   save_connectivity "stop-failure-connectivity.txt"
   fail_smoke "Android release imported-profile smoke failed: VPN network still present after stop."
 fi
+vpn_stop_cleaned=1
 save_connectivity "stopped-connectivity.txt"
 save_filtered_logcat "final-logcat-filtered.txt"
 save_ui_dump "stopped-ui.xml"

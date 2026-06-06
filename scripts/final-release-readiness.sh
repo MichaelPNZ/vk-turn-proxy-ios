@@ -178,11 +178,38 @@ require_android_physical_evidence() {
     external_blocker "ANDROID_PHYSICAL_SMOKE_EVIDENCE summary does not contain result=passed: $summary"
     return
   fi
+  if ! grep -q '^evidence_type=android_physical_smoke$' "$summary"; then
+    external_blocker "ANDROID_PHYSICAL_SMOKE_EVIDENCE summary does not contain evidence_type=android_physical_smoke: $summary"
+    return
+  fi
   if ! grep -q '^require_physical_device=1$' "$summary"; then
     external_blocker "ANDROID_PHYSICAL_SMOKE_EVIDENCE was not produced with REQUIRE_PHYSICAL_DEVICE=1: $summary"
     return
   fi
   require_file_in_dir ANDROID_PHYSICAL_SMOKE_EVIDENCE "$value" "device-qemu.txt" || return
+  local device_qemu
+  device_qemu="$(tr -d '\r' < "$value/device-qemu.txt" | head -1)"
+  if [[ "$device_qemu" != "0" ]]; then
+    external_blocker "ANDROID_PHYSICAL_SMOKE_EVIDENCE device-qemu.txt must contain 0 for a physical device: $value/device-qemu.txt"
+    return
+  fi
+  if ! grep -q '^device_qemu=0$' "$summary"; then
+    external_blocker "ANDROID_PHYSICAL_SMOKE_EVIDENCE summary does not contain device_qemu=0: $summary"
+    return
+  fi
+  local attachment_count
+  attachment_count="$(awk -F= '$1 == "attachment_count" {print $2}' "$summary" | tail -1)"
+  if [[ ! "$attachment_count" =~ ^[1-9][0-9]*$ ]]; then
+    external_blocker "ANDROID_PHYSICAL_SMOKE_EVIDENCE summary must contain attachment_count > 0: $summary"
+    return
+  fi
+  local marker
+  for marker in wireguard_attached_observed vpn_network_observed vpn_stop_cleaned; do
+    if ! grep -q "^$marker=1$" "$summary"; then
+      external_blocker "ANDROID_PHYSICAL_SMOKE_EVIDENCE summary does not contain $marker=1: $summary"
+      return
+    fi
+  done
   require_file_in_dir ANDROID_PHYSICAL_SMOKE_EVIDENCE "$value" "running-connectivity.txt" || return
   require_file_in_dir ANDROID_PHYSICAL_SMOKE_EVIDENCE "$value" "stopped-connectivity.txt" || return
   require_file_in_dir ANDROID_PHYSICAL_SMOKE_EVIDENCE "$value" "final-logcat-filtered.txt" || return
@@ -235,6 +262,7 @@ check_shell_syntax \
   scripts/package-server.sh \
   scripts/package-windows-runtime.sh \
   scripts/test-server-deploy-safety.sh \
+  scripts/test-android-physical-evidence-contract.sh \
   scripts/test-external-smoke-kit.sh \
   scripts/test-windows-installer-packaging.sh \
   scripts/preflight-android-release.sh \
@@ -248,6 +276,7 @@ check_shell_syntax \
 run_required "git diff hygiene" git diff --check
 run_required "release manifest format test" scripts/test-release-manifest-format.sh
 run_required "server deploy safety test" scripts/test-server-deploy-safety.sh
+run_required "android physical evidence contract test" scripts/test-android-physical-evidence-contract.sh
 run_required "external smoke kit test" scripts/test-external-smoke-kit.sh
 run_required "windows installer packaging test" scripts/test-windows-installer-packaging.sh
 

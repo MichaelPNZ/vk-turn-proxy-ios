@@ -60,6 +60,25 @@ has_summary_type_passed() {
     grep -q "^evidence_type=$evidence_type$" "$dir/summary.txt"
 }
 
+has_android_physical_smoke_passed() {
+  local dir="$1"
+  local summary="$dir/summary.txt"
+  [[ -f "$summary" ]] || return 1
+  grep -q '^result=passed$' "$summary" || return 1
+  grep -q '^evidence_type=android_physical_smoke$' "$summary" || return 1
+  [[ "$(summary_value "$summary" attachment_count)" =~ ^[1-9][0-9]*$ ]] || return 1
+  grep -q '^require_physical_device=1$' "$summary" || return 1
+  grep -q '^device_qemu=0$' "$summary" || return 1
+  grep -q '^wireguard_attached_observed=1$' "$summary" || return 1
+  grep -q '^vpn_network_observed=1$' "$summary" || return 1
+  grep -q '^vpn_stop_cleaned=1$' "$summary" || return 1
+  [[ -f "$dir/device-qemu.txt" ]] || return 1
+  [[ "$(tr -d '\r' < "$dir/device-qemu.txt" | head -1)" == "0" ]] || return 1
+  [[ -f "$dir/running-connectivity.txt" ]] || return 1
+  [[ -f "$dir/stopped-connectivity.txt" ]] || return 1
+  [[ -f "$dir/final-logcat-filtered.txt" ]] || return 1
+}
+
 check_git() {
   local head
   head="$(git -C "$ROOT_DIR" rev-parse --short HEAD)"
@@ -170,12 +189,10 @@ check_android_physical() {
     write_status android blocked "physical_device_missing"
   fi
   if [[ -n "${ANDROID_PHYSICAL_SMOKE_EVIDENCE:-}" ]] &&
-    [[ -f "$ANDROID_PHYSICAL_SMOKE_EVIDENCE/summary.txt" ]] &&
-    grep -q '^result=passed$' "$ANDROID_PHYSICAL_SMOKE_EVIDENCE/summary.txt" &&
-    grep -q '^require_physical_device=1$' "$ANDROID_PHYSICAL_SMOKE_EVIDENCE/summary.txt"; then
+    has_android_physical_smoke_passed "$ANDROID_PHYSICAL_SMOKE_EVIDENCE"; then
     write_status android ready "physical_smoke_evidence=$ANDROID_PHYSICAL_SMOKE_EVIDENCE"
   else
-    write_status android blocked "ANDROID_PHYSICAL_SMOKE_EVIDENCE_missing_or_not_passed"
+    write_status android blocked "ANDROID_PHYSICAL_SMOKE_EVIDENCE_missing_or_contract_failed"
   fi
 }
 

@@ -62,8 +62,11 @@ SERIAL=<adb-device-id> \
 
 The smoke prints `evidence_dir=...` on success. Use that directory as
 `ANDROID_PHYSICAL_SMOKE_EVIDENCE` for `scripts/final-release-readiness.sh`.
-The summary must contain `result=passed` and `require_physical_device=1`, so an
-emulator run cannot satisfy the physical-device release gate.
+The summary must contain `result=passed`, `evidence_type=android_physical_smoke`,
+`require_physical_device=1`, `device_qemu=0`, `attachment_count > 0`, and
+`wireguard_attached_observed=1`, `vpn_network_observed=1`,
+`vpn_stop_cleaned=1`. This prevents an emulator run or a partial smoke from
+satisfying the physical-device release gate.
 Final readiness also requires the runtime evidence files written by the smoke:
 `device-qemu.txt`, `running-connectivity.txt`, `stopped-connectivity.txt`, and
 `final-logcat-filtered.txt`.
