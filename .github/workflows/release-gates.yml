@@ -16,6 +16,7 @@ jobs:
     timeout-minutes: 90
 
     env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       ANDROID_HOME: /Users/runner/Library/Android/sdk
       CI_ANDROID_STORE_PASSWORD: ci-android-store-password
       CI_ANDROID_KEY_PASSWORD: ci-android-store-password
