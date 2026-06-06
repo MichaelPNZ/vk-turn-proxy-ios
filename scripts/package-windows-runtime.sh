@@ -496,6 +496,11 @@ $transcript = Join-Path $evidenceDir "transcript.txt"
 Start-Transcript -Path $transcript -Force | Out-Null
 
 $failed = $false
+$validateOk = $false
+$serviceInstalled = $false
+$wireguardAttachedObserved = $false
+$programDataStatusCaptured = $false
+$stopVerified = $false
 try {
   Write-Host "VK Turn Proxy Windows runtime smoke"
   Write-Host "Evidence: $evidenceDir"
@@ -515,9 +520,14 @@ try {
   if ($LASTEXITCODE -ne 0) {
     throw "Start request validation failed with exit code $LASTEXITCODE"
   }
+  $validateOk = $true
 
   Write-Host "Installing or updating service"
   & "$PSScriptRoot\install-service.ps1" | Tee-Object -FilePath (Join-Path $evidenceDir "install-service.txt")
+  $serviceInstalled = Test-VKTurnServiceExists
+  if (!$serviceInstalled) {
+    throw "Service was not installed after install-service.ps1"
+  }
 
   Write-Host "Starting tunnel"
   & "$PSScriptRoot\start-tunnel.ps1" | Tee-Object -FilePath (Join-Path $evidenceDir "start-tunnel.txt")
@@ -526,6 +536,7 @@ try {
     $state = Read-StatusState
     throw "Timed out waiting for status state wireguard_attached. Last state: $state"
   }
+  $wireguardAttachedObserved = $true
 
   Write-Host "wireguard_attached observed"
   & "$PSScriptRoot\status-tunnel.ps1" | Tee-Object -FilePath (Join-Path $evidenceDir "status-running.json")
@@ -533,6 +544,7 @@ try {
 
   if (Test-Path $statusPath) {
     Copy-Item -Force $statusPath (Join-Path $evidenceDir "programdata-status-running.json")
+    $programDataStatusCaptured = $true
   }
   if (Test-Path $logPath) {
     Copy-Item -Force $logPath (Join-Path $evidenceDir "programdata-service.log")
@@ -541,7 +553,11 @@ try {
   if (!$KeepRunning) {
     Write-Host "Stopping tunnel"
     & "$PSScriptRoot\stop-tunnel.ps1" | Tee-Object -FilePath (Join-Path $evidenceDir "stop-tunnel.txt")
-    Start-Sleep -Seconds 2
+    if (!(Wait-ForState -Expected "stopped" -TimeoutSeconds 20)) {
+      $state = Read-StatusState
+      throw "Timed out waiting for status state stopped after stop. Last state: $state"
+    }
+    $stopVerified = $true
     & "$PSScriptRoot\status-tunnel.ps1" | Tee-Object -FilePath (Join-Path $evidenceDir "status-stopped.json")
   } else {
     Write-Host "KeepRunning was set; leaving tunnel running."
@@ -555,6 +571,11 @@ try {
     statusPath = $statusPath
     logPath = $logPath
     keepRunning = [bool]$KeepRunning
+    validateOk = $validateOk
+    serviceInstalled = $serviceInstalled
+    wireguardAttachedObserved = $wireguardAttachedObserved
+    programDataStatusCaptured = $programDataStatusCaptured
+    stopVerified = $stopVerified
     completedAt = (Get-Date).ToUniversalTime().ToString("o")
   }
   $summary | ConvertTo-Json -Depth 4 | Tee-Object -FilePath (Join-Path $evidenceDir "summary.json")

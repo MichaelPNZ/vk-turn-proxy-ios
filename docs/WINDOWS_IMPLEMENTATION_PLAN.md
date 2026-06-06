@@ -169,10 +169,15 @@ installs or updates `VKTurnProxyTunnel`, starts the tunnel, waits for
 `wireguard_attached`, exports status/log evidence into
 `config\windows-smoke-<timestamp>\`, and stops the tunnel unless `-KeepRunning`
 is passed. Its `summary.json` must contain `ok=true` and
-`evidenceType=windows_runtime_smoke`; use that directory as
-`WINDOWS_RUNTIME_SMOKE_EVIDENCE` for `scripts/final-release-readiness.sh`.
-Final readiness also requires `transcript.txt`, `status-running.json`, and
-`programdata-status-running.json` from that evidence directory.
+`evidenceType=windows_runtime_smoke`, plus `validateOk=true`,
+`serviceInstalled=true`, `wireguardAttachedObserved=true`,
+`programDataStatusCaptured=true`, `stopVerified=true`, and
+`keepRunning=false`; use that directory as `WINDOWS_RUNTIME_SMOKE_EVIDENCE`
+for `scripts/final-release-readiness.sh`.
+Final readiness also requires `transcript.txt`, `validate.txt`,
+`install-service.txt`, `start-tunnel.txt`, `status-running.json`,
+`programdata-status-running.json`, `stop-tunnel.txt`, and
+`status-stopped.json` from that evidence directory.
 
 Manual packaged runtime smoke:
 

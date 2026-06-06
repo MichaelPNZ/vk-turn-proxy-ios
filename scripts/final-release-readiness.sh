@@ -153,9 +153,37 @@ require_windows_runtime_evidence() {
     external_blocker "WINDOWS_RUNTIME_SMOKE_EVIDENCE summary.json does not contain evidenceType=windows_runtime_smoke: $summary"
     return
   fi
+  local marker
+  for marker in validateOk serviceInstalled wireguardAttachedObserved programDataStatusCaptured stopVerified; do
+    if ! grep -q "\"$marker\"[[:space:]]*:[[:space:]]*true" "$summary"; then
+      external_blocker "WINDOWS_RUNTIME_SMOKE_EVIDENCE summary.json does not contain $marker=true: $summary"
+      return
+    fi
+  done
+  if ! grep -q '"keepRunning"[[:space:]]*:[[:space:]]*false' "$summary"; then
+    external_blocker "WINDOWS_RUNTIME_SMOKE_EVIDENCE summary.json must contain keepRunning=false to prove cleanup: $summary"
+    return
+  fi
   require_file_in_dir WINDOWS_RUNTIME_SMOKE_EVIDENCE "$value" "transcript.txt" || return
+  require_file_in_dir WINDOWS_RUNTIME_SMOKE_EVIDENCE "$value" "validate.txt" || return
+  require_file_in_dir WINDOWS_RUNTIME_SMOKE_EVIDENCE "$value" "install-service.txt" || return
+  require_file_in_dir WINDOWS_RUNTIME_SMOKE_EVIDENCE "$value" "start-tunnel.txt" || return
   require_file_in_dir WINDOWS_RUNTIME_SMOKE_EVIDENCE "$value" "status-running.json" || return
   require_file_in_dir WINDOWS_RUNTIME_SMOKE_EVIDENCE "$value" "programdata-status-running.json" || return
+  require_file_in_dir WINDOWS_RUNTIME_SMOKE_EVIDENCE "$value" "stop-tunnel.txt" || return
+  require_file_in_dir WINDOWS_RUNTIME_SMOKE_EVIDENCE "$value" "status-stopped.json" || return
+  if ! grep -q '"state"[[:space:]]*:[[:space:]]*"wireguard_attached"' "$value/status-running.json"; then
+    external_blocker "WINDOWS_RUNTIME_SMOKE_EVIDENCE status-running.json does not contain state=wireguard_attached: $value/status-running.json"
+    return
+  fi
+  if ! grep -q '"state"[[:space:]]*:[[:space:]]*"wireguard_attached"' "$value/programdata-status-running.json"; then
+    external_blocker "WINDOWS_RUNTIME_SMOKE_EVIDENCE programdata-status-running.json does not contain state=wireguard_attached: $value/programdata-status-running.json"
+    return
+  fi
+  if ! grep -q '"state"[[:space:]]*:[[:space:]]*"stopped"' "$value/status-stopped.json"; then
+    external_blocker "WINDOWS_RUNTIME_SMOKE_EVIDENCE status-stopped.json does not contain state=stopped: $value/status-stopped.json"
+    return
+  fi
   pass "WINDOWS_RUNTIME_SMOKE_EVIDENCE passed summary.json evidence contract: $value"
 }
 
@@ -263,6 +291,7 @@ check_shell_syntax \
   scripts/package-windows-runtime.sh \
   scripts/test-server-deploy-safety.sh \
   scripts/test-android-physical-evidence-contract.sh \
+  scripts/test-windows-runtime-evidence-contract.sh \
   scripts/test-external-smoke-kit.sh \
   scripts/test-windows-installer-packaging.sh \
   scripts/preflight-android-release.sh \
@@ -277,6 +306,7 @@ run_required "git diff hygiene" git diff --check
 run_required "release manifest format test" scripts/test-release-manifest-format.sh
 run_required "server deploy safety test" scripts/test-server-deploy-safety.sh
 run_required "android physical evidence contract test" scripts/test-android-physical-evidence-contract.sh
+run_required "windows runtime evidence contract test" scripts/test-windows-runtime-evidence-contract.sh
 run_required "external smoke kit test" scripts/test-external-smoke-kit.sh
 run_required "windows installer packaging test" scripts/test-windows-installer-packaging.sh
 

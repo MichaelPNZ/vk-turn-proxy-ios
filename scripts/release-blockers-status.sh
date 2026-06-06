@@ -79,6 +79,30 @@ has_android_physical_smoke_passed() {
   [[ -f "$dir/final-logcat-filtered.txt" ]] || return 1
 }
 
+has_windows_runtime_smoke_passed() {
+  local dir="$1"
+  local summary="$dir/summary.json"
+  [[ -f "$summary" ]] || return 1
+  grep -q '"ok"[[:space:]]*:[[:space:]]*true' "$summary" || return 1
+  grep -q '"evidenceType"[[:space:]]*:[[:space:]]*"windows_runtime_smoke"' "$summary" || return 1
+  grep -q '"keepRunning"[[:space:]]*:[[:space:]]*false' "$summary" || return 1
+  local marker
+  for marker in validateOk serviceInstalled wireguardAttachedObserved programDataStatusCaptured stopVerified; do
+    grep -q "\"$marker\"[[:space:]]*:[[:space:]]*true" "$summary" || return 1
+  done
+  [[ -f "$dir/transcript.txt" ]] || return 1
+  [[ -f "$dir/validate.txt" ]] || return 1
+  [[ -f "$dir/install-service.txt" ]] || return 1
+  [[ -f "$dir/start-tunnel.txt" ]] || return 1
+  [[ -f "$dir/status-running.json" ]] || return 1
+  [[ -f "$dir/programdata-status-running.json" ]] || return 1
+  [[ -f "$dir/stop-tunnel.txt" ]] || return 1
+  [[ -f "$dir/status-stopped.json" ]] || return 1
+  grep -q '"state"[[:space:]]*:[[:space:]]*"wireguard_attached"' "$dir/status-running.json" || return 1
+  grep -q '"state"[[:space:]]*:[[:space:]]*"wireguard_attached"' "$dir/programdata-status-running.json" || return 1
+  grep -q '"state"[[:space:]]*:[[:space:]]*"stopped"' "$dir/status-stopped.json" || return 1
+}
+
 check_git() {
   local head
   head="$(git -C "$ROOT_DIR" rev-parse --short HEAD)"
@@ -243,11 +267,11 @@ check_windows() {
       ;;
   esac
 
-  if [[ -n "${WINDOWS_RUNTIME_SMOKE_EVIDENCE:-}" && -f "$WINDOWS_RUNTIME_SMOKE_EVIDENCE/summary.json" ]] &&
-    grep -q '"ok"[[:space:]]*:[[:space:]]*true' "$WINDOWS_RUNTIME_SMOKE_EVIDENCE/summary.json"; then
+  if [[ -n "${WINDOWS_RUNTIME_SMOKE_EVIDENCE:-}" ]] &&
+    has_windows_runtime_smoke_passed "$WINDOWS_RUNTIME_SMOKE_EVIDENCE"; then
     write_status windows ready "runtime_smoke=$WINDOWS_RUNTIME_SMOKE_EVIDENCE"
   else
-    write_status windows blocked "WINDOWS_RUNTIME_SMOKE_EVIDENCE_missing_or_not_passed"
+    write_status windows blocked "WINDOWS_RUNTIME_SMOKE_EVIDENCE_missing_or_contract_failed"
   fi
 
   if [[ -n "${WINDOWS_INSTALLER_SMOKE_EVIDENCE:-}" ]] &&
