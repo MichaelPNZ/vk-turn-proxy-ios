@@ -50,6 +50,7 @@ check_shell_syntax \
   scripts/local-readiness-gate.sh \
   scripts/package-release-artifacts.sh \
   scripts/prepare-external-smoke-kit.sh \
+  scripts/release-blockers-status.sh \
   scripts/release-manifest-lib.sh \
   scripts/package-server.sh \
   scripts/package-windows-runtime.sh \

@@ -1,0 +1,270 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TAG="${1:-v1.0-build156}"
+ANDROID_HOME="${ANDROID_HOME:-"$HOME/Library/Android/sdk"}"
+HOST="${HOST:-142.252.220.91}"
+SSH_USER="${SSH_USER:-root}"
+RUN_APPLE_SIGNING="${RUN_APPLE_SIGNING:-1}"
+RUN_SERVER_BASELINE="${RUN_SERVER_BASELINE:-1}"
+RUN_GITHUB="${RUN_GITHUB:-1}"
+OUT_DIR="${OUT_DIR:-"$ROOT_DIR/build/release-status/$TAG"}"
+
+mkdir -p "$OUT_DIR"
+
+status_file="$OUT_DIR/status.tsv"
+: > "$status_file"
+
+usage() {
+  cat >&2 <<'EOF'
+Usage:
+  scripts/release-blockers-status.sh [tag]
+
+Environment:
+  OUT_DIR=build/release-status/<tag>
+  RUN_GITHUB=1|0          default: 1, reads GitHub Actions state via gh
+  RUN_APPLE_SIGNING=1|0   default: 1, runs read-only Apple signing collector
+  RUN_SERVER_BASELINE=1|0 default: 1, runs read-only production baseline collector
+  HOST=142.252.220.91
+  SSH_USER=root
+
+Read-only status collector. It does not promote production, upload TestFlight
+builds, install profiles, modify keychains, install APKs, or start VPNs.
+EOF
+}
+
+if [[ "$TAG" == "-h" || "$TAG" == "--help" || "$TAG" == "help" ]]; then
+  usage
+  exit 64
+fi
+
+write_status() {
+  local area="$1"
+  local state="$2"
+  local detail="$3"
+  printf '%s\t%s\t%s\n' "$area" "$state" "$detail" | tee -a "$status_file" >/dev/null
+}
+
+summary_value() {
+  local file="$1"
+  local key="$2"
+  awk -F= -v key="$key" '$1 == key {value=$2} END {print value}' "$file" 2>/dev/null || true
+}
+
+has_summary_type_passed() {
+  local dir="$1"
+  local evidence_type="$2"
+  [[ -f "$dir/summary.txt" ]] &&
+    grep -q '^result=passed$' "$dir/summary.txt" &&
+    grep -q "^evidence_type=$evidence_type$" "$dir/summary.txt"
+}
+
+check_git() {
+  local head
+  head="$(git -C "$ROOT_DIR" rev-parse --short HEAD)"
+  write_status git info "head=$head"
+  if [[ -n "$(git -C "$ROOT_DIR" status --porcelain)" ]]; then
+    write_status git blocked "working_tree=dirty"
+  else
+    write_status git ready "working_tree=clean"
+  fi
+  if git -C "$ROOT_DIR" rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+    write_status git ready "tag_exists=$TAG"
+  else
+    write_status git blocked "tag_missing=$TAG"
+  fi
+}
+
+check_github() {
+  if [[ "$RUN_GITHUB" != "1" ]]; then
+    write_status github skipped "RUN_GITHUB=0"
+    return
+  fi
+  if ! command -v gh >/dev/null 2>&1; then
+    write_status github blocked "gh_missing"
+    return
+  fi
+  if ! gh auth status >/dev/null 2>&1; then
+    write_status github blocked "gh_not_authenticated"
+    return
+  fi
+
+  local head run
+  head="$(git -C "$ROOT_DIR" rev-parse HEAD)"
+  run="$(gh run list \
+    --repo MichaelPNZ/vk-turn-proxy-ios \
+    --branch main \
+    --limit 20 \
+    --json databaseId,workflowName,status,conclusion,headSha,url \
+    --jq ".[] | select(.workflowName == \"Release Gates\" and .headSha == \"$head\") | [.databaseId, .status, .conclusion, .url] | @tsv" \
+    | head -1 || true)"
+  if [[ -z "$run" ]]; then
+    write_status github blocked "release_gates_run_missing_for_head=$head"
+    return
+  fi
+  IFS=$'\t' read -r run_id run_status run_conclusion run_url <<<"$run"
+  if [[ "$run_status" == "completed" && "$run_conclusion" == "success" ]]; then
+    write_status github ready "release_gates_success run=$run_id url=$run_url"
+  else
+    write_status github blocked "release_gates_not_success run=$run_id status=$run_status conclusion=$run_conclusion url=$run_url"
+  fi
+
+  local artifact
+  artifact="$(gh api "repos/MichaelPNZ/vk-turn-proxy-ios/actions/runs/$run_id/artifacts" \
+    --jq ".artifacts[] | select(.name == \"vk-turn-proxy-$TAG-ci-artifacts\") | [.size_in_bytes, .expired] | @tsv" \
+    | head -1 || true)"
+  if [[ -z "$artifact" ]]; then
+    write_status github blocked "ci_artifact_missing run=$run_id"
+  else
+    IFS=$'\t' read -r artifact_size artifact_expired <<<"$artifact"
+    if [[ "$artifact_expired" == "false" ]]; then
+      write_status github ready "ci_artifact_present size=$artifact_size expired=$artifact_expired"
+    else
+      write_status github blocked "ci_artifact_expired size=$artifact_size"
+    fi
+  fi
+}
+
+check_android_physical() {
+  local adb="$ANDROID_HOME/platform-tools/adb"
+  if [[ ! -x "$adb" ]]; then
+    write_status android blocked "adb_missing=$adb"
+    return
+  fi
+  "$adb" devices -l > "$OUT_DIR/adb-devices.txt" 2>&1 || true
+  local physical_count
+  physical_count="$(awk 'NR > 1 && $2 == "device" && $0 !~ /emulator/ {count++} END {print count + 0}' "$OUT_DIR/adb-devices.txt")"
+  if [[ "$physical_count" -gt 0 ]]; then
+    write_status android ready "physical_device_connected=$physical_count"
+  else
+    write_status android blocked "physical_device_missing"
+  fi
+  if [[ -n "${ANDROID_PHYSICAL_SMOKE_EVIDENCE:-}" ]] &&
+    [[ -f "$ANDROID_PHYSICAL_SMOKE_EVIDENCE/summary.txt" ]] &&
+    grep -q '^result=passed$' "$ANDROID_PHYSICAL_SMOKE_EVIDENCE/summary.txt" &&
+    grep -q '^require_physical_device=1$' "$ANDROID_PHYSICAL_SMOKE_EVIDENCE/summary.txt"; then
+    write_status android ready "physical_smoke_evidence=$ANDROID_PHYSICAL_SMOKE_EVIDENCE"
+  else
+    write_status android blocked "ANDROID_PHYSICAL_SMOKE_EVIDENCE_missing_or_not_passed"
+  fi
+}
+
+check_apple() {
+  if [[ "$RUN_APPLE_SIGNING" != "1" ]]; then
+    write_status apple skipped "RUN_APPLE_SIGNING=0"
+    return
+  fi
+  local evidence="$OUT_DIR/apple-signing"
+  if scripts/collect-apple-signing-evidence.sh "$evidence" > "$OUT_DIR/apple-signing-command.txt" 2>&1; then
+    :
+  else
+    write_status apple blocked "apple_signing_collector_failed output=$OUT_DIR/apple-signing-command.txt"
+    return
+  fi
+  local result blockers ready
+  result="$(summary_value "$evidence/summary.txt" result)"
+  blockers="$(summary_value "$evidence/summary.txt" blocker_count)"
+  ready="$(summary_value "$evidence/summary.txt" testflight_ready)"
+  if [[ "$result" == "passed" && "$ready" == "true" ]]; then
+    write_status apple ready "testflight_signing_ready blockers=$blockers"
+  else
+    write_status apple blocked "testflight_signing_not_ready blockers=${blockers:-unknown} evidence=$evidence"
+  fi
+
+  if [[ -n "${IPHONE_TESTFLIGHT_SMOKE_EVIDENCE:-}" ]] &&
+    has_summary_type_passed "$IPHONE_TESTFLIGHT_SMOKE_EVIDENCE" iphone_testflight_network_extension; then
+    write_status apple ready "iphone_testflight_smoke=$IPHONE_TESTFLIGHT_SMOKE_EVIDENCE"
+  else
+    write_status apple blocked "IPHONE_TESTFLIGHT_SMOKE_EVIDENCE_missing_or_not_passed"
+  fi
+
+  if [[ -n "${MACOS_TESTFLIGHT_SMOKE_EVIDENCE:-}" ]] &&
+    has_summary_type_passed "$MACOS_TESTFLIGHT_SMOKE_EVIDENCE" macos_testflight_packet_tunnel; then
+    write_status apple ready "macos_testflight_smoke=$MACOS_TESTFLIGHT_SMOKE_EVIDENCE"
+  else
+    write_status apple blocked "MACOS_TESTFLIGHT_SMOKE_EVIDENCE_missing_or_not_passed"
+  fi
+}
+
+check_windows() {
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+      write_status windows ready "windows_host=true"
+      ;;
+    *)
+      write_status windows blocked "windows_host_required current_os=$(uname -s)"
+      ;;
+  esac
+
+  if [[ -n "${WINDOWS_RUNTIME_SMOKE_EVIDENCE:-}" && -f "$WINDOWS_RUNTIME_SMOKE_EVIDENCE/summary.json" ]] &&
+    grep -q '"ok"[[:space:]]*:[[:space:]]*true' "$WINDOWS_RUNTIME_SMOKE_EVIDENCE/summary.json"; then
+    write_status windows ready "runtime_smoke=$WINDOWS_RUNTIME_SMOKE_EVIDENCE"
+  else
+    write_status windows blocked "WINDOWS_RUNTIME_SMOKE_EVIDENCE_missing_or_not_passed"
+  fi
+
+  if [[ -n "${WINDOWS_INSTALLER_SMOKE_EVIDENCE:-}" ]] &&
+    has_summary_type_passed "$WINDOWS_INSTALLER_SMOKE_EVIDENCE" windows_installer_smoke; then
+    write_status windows ready "installer_smoke=$WINDOWS_INSTALLER_SMOKE_EVIDENCE"
+  else
+    write_status windows blocked "WINDOWS_INSTALLER_SMOKE_EVIDENCE_missing_or_not_passed"
+  fi
+}
+
+check_server() {
+  if [[ -n "${SERVER_PRODUCTION_SMOKE_EVIDENCE:-}" ]] &&
+    has_summary_type_passed "$SERVER_PRODUCTION_SMOKE_EVIDENCE" server_production_smoke; then
+    write_status server ready "production_smoke=$SERVER_PRODUCTION_SMOKE_EVIDENCE"
+    return
+  fi
+
+  write_status server blocked "SERVER_PRODUCTION_SMOKE_EVIDENCE_missing_or_not_passed"
+  if [[ "$RUN_SERVER_BASELINE" != "1" ]]; then
+    write_status server skipped "RUN_SERVER_BASELINE=0"
+    return
+  fi
+  local evidence="$OUT_DIR/server-production-baseline"
+  if MODE=baseline HOST="$HOST" SSH_USER="$SSH_USER" scripts/collect-server-production-evidence.sh "$evidence" > "$OUT_DIR/server-baseline-command.txt" 2>&1; then
+    local service listener health readyz
+    service="$(summary_value "$evidence/summary.txt" service)"
+    listener="$(summary_value "$evidence/summary.txt" listener_56004)"
+    health="$(summary_value "$evidence/summary.txt" healthz)"
+    readyz="$(summary_value "$evidence/summary.txt" readyz)"
+    write_status server info "baseline service=$service listener_56004=$listener healthz=$health readyz=$readyz evidence=$evidence"
+  else
+    write_status server blocked "server_baseline_collector_failed output=$OUT_DIR/server-baseline-command.txt"
+  fi
+}
+
+write_summary() {
+  local ready blocked skipped info
+  ready="$(awk -F'\t' '$2 == "ready" {count++} END {print count + 0}' "$status_file")"
+  blocked="$(awk -F'\t' '$2 == "blocked" {count++} END {print count + 0}' "$status_file")"
+  skipped="$(awk -F'\t' '$2 == "skipped" {count++} END {print count + 0}' "$status_file")"
+  info="$(awk -F'\t' '$2 == "info" {count++} END {print count + 0}' "$status_file")"
+  {
+    printf 'result=%s\n' "$(if [[ "$blocked" -eq 0 ]]; then echo ready; else echo blocked; fi)"
+    printf 'tag=%s\n' "$TAG"
+    printf 'completed_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf 'ready_count=%s\n' "$ready"
+    printf 'blocked_count=%s\n' "$blocked"
+    printf 'skipped_count=%s\n' "$skipped"
+    printf 'info_count=%s\n' "$info"
+    printf 'status_file=%s\n' "$status_file"
+  } > "$OUT_DIR/summary.txt"
+}
+
+cd "$ROOT_DIR"
+
+check_git
+check_github
+check_android_physical
+check_apple
+check_windows
+check_server
+write_summary
+
+cat "$OUT_DIR/summary.txt"
+printf '\nStatus details:\n'
+column -ts $'\t' "$status_file" 2>/dev/null || cat "$status_file"
