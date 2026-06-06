@@ -89,7 +89,9 @@ func main() {
 	m.lastActivityUnix.Store(m.startedAtUnix)
 
 	if *healthListen != "" {
-		startHealthServer(ctx, *healthListen, *connect, m)
+		if err := startHealthServer(ctx, *healthListen, *connect, m); err != nil {
+			log.Fatalf("%v", err)
+		}
 	}
 
 	if err := runSrtpServer(ctx, *listen, *connect, *idleTimeout, *maxSessions, m); err != nil && !errors.Is(err, context.Canceled) {
@@ -281,8 +283,17 @@ func isProbePacket(buf []byte) bool {
 	return true
 }
 
-func startHealthServer(ctx context.Context, listen, connect string, m *metrics) {
-	server := &http.Server{Addr: listen, Handler: newHealthMux(connect, m)}
+func startHealthServer(ctx context.Context, listen, connect string, m *metrics) error {
+	ln, err := net.Listen("tcp", listen)
+	if err != nil {
+		return fmt.Errorf("admin health listen %s: %w", listen, err)
+	}
+	startHealthServerOnListener(ctx, ln, connect, m)
+	return nil
+}
+
+func startHealthServerOnListener(ctx context.Context, ln net.Listener, connect string, m *metrics) {
+	server := &http.Server{Handler: newHealthMux(connect, m)}
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -290,8 +301,8 @@ func startHealthServer(ctx context.Context, listen, connect string, m *metrics) 
 		_ = server.Shutdown(shutdownCtx)
 	}()
 	go func() {
-		log.Printf("admin health server listening on %s", listen)
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Printf("admin health server listening on %s", ln.Addr())
+		if err := server.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("admin health server: %v", err)
 		}
 	}()

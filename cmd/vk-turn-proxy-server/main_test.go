@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -80,6 +82,40 @@ func TestHealthMuxEndpoints(t *testing.T) {
 			t.Fatalf("/metrics missing %q in:\n%s", want, body)
 		}
 	}
+}
+
+func TestStartHealthServerFailsWhenAdminPortBusy(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen busy port fixture: %v", err)
+	}
+	defer ln.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	m := &metrics{startedAtUnix: time.Now().Unix()}
+	err = startHealthServer(ctx, ln.Addr().String(), "127.0.0.1:51820", m)
+	if err == nil {
+		t.Fatal("expected busy admin port to fail")
+	}
+	if !strings.Contains(err.Error(), "admin health listen") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestStartHealthServerOnListenerServesEndpoints(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen health fixture: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	m := &metrics{startedAtUnix: time.Now().Unix()}
+	startHealthServerOnListener(ctx, ln, "127.0.0.1:51820", m)
+
+	assertTextEndpoint(t, "http://"+ln.Addr().String()+"/healthz", http.StatusOK, "ok\n")
 }
 
 func TestReadyzRejectsInvalidBackendAddress(t *testing.T) {

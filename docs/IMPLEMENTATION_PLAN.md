@@ -160,6 +160,8 @@ Current verification:
   systemd/`/healthz`/`/readyz` checks fail, writes `failed-promote.txt` and
   `after-auto-rollback.txt`, then exits non-zero.
 - `scripts/test-server-deploy-safety.sh` verifies the production promote and dry-run guards locally.
+- Server startup now fails fast if the admin health listener cannot bind, so a
+  promoted process cannot silently run without `/healthz` and `/readyz`.
 - `scripts/final-release-readiness.sh <tag>` requires production-port smoke evidence before final release readiness can pass.
 - `scripts/prepare-external-smoke-kit.sh <tag>` creates a no-secrets handoff kit under `build/external-smoke-kit/<tag>/` with external smoke commands/templates and final readiness env placeholders.
 - `scripts/release-blockers-status.sh <tag>` produces a read-only readiness snapshot under `build/release-status/<tag>/` with current GitHub CI/artifact, TestFlight workflow/secrets, Android physical-device, Apple signing/TestFlight, Windows, and production-server blocker status.
