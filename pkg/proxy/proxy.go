@@ -330,7 +330,7 @@ type Proxy struct {
 	// Active-probe-on-wake plumbing. WakeHealthCheck() (called from the
 	// Swift extension's wake() override via wgWakeHealthCheck) closes
 	// wakeCh to broadcast to every per-conn probe goroutine; each one
-	// then sends an extra ping out-of-schedule and waits up to 5s for
+	// then sends an extra ping out-of-schedule and waits up to 30s for
 	// the echo, killing the conn immediately if no echo arrives. This
 	// short-circuits the 2-minute timer-based zombie detection during
 	// LTE sleep/wake storms (vpn.lte.1.log 2026-05-03 showed cascades
@@ -339,6 +339,7 @@ type Proxy struct {
 	// 50 conns × N times if the wake events come in rapid succession.
 	wakeMu            sync.RWMutex
 	wakeCh            chan struct{}
+	wakeProbeSlots    chan struct{}
 	lastActiveProbeAt []atomic.Int64
 
 	// Per-conn byte counters for diagnostic of throughput asymmetry.
@@ -456,6 +457,7 @@ func NewProxy(cfg Config) *Proxy {
 		lastRxAt:          make([]atomic.Int64, cfg.NumConns),
 		connLocalIPs:      make([]atomic.Value, cfg.NumConns),
 		wakeCh:            make(chan struct{}),
+		wakeProbeSlots:    make(chan struct{}, wakeProbeLimitForNumConns(cfg.NumConns)),
 		startedAt:         time.Now(),
 	}
 	// Wire up WRAP-A state on the constructed proxy (key + provision channel).
@@ -1292,6 +1294,42 @@ func (p *Proxy) wakeChannel() <-chan struct{} {
 	p.wakeMu.RLock()
 	defer p.wakeMu.RUnlock()
 	return p.wakeCh
+}
+
+func wakeProbeLimitForNumConns(numConns int) int {
+	if numConns <= 0 {
+		return 1
+	}
+	limit := (numConns + 9) / 10 // ceil(NumConns/10)
+	if limit < 1 {
+		return 1
+	}
+	if limit > 6 {
+		return 6
+	}
+	return limit
+}
+
+func (p *Proxy) tryAcquireWakeProbeSlot() bool {
+	if p.wakeProbeSlots == nil {
+		return true
+	}
+	select {
+	case p.wakeProbeSlots <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (p *Proxy) releaseWakeProbeSlot() {
+	if p.wakeProbeSlots == nil {
+		return
+	}
+	select {
+	case <-p.wakeProbeSlots:
+	default:
+	}
 }
 
 // runWatchdog monitors tunnel health and forces reconnection when dead.
@@ -2401,6 +2439,9 @@ func (p *Proxy) runDTLSSession(sessCtx context.Context, linkID string, readyCh c
 						return
 					}
 				}
+				if !p.tryAcquireWakeProbeSlot() {
+					continue
+				}
 				now := time.Now()
 				p.lastActiveProbeAt[connIdx].Store(now.Unix())
 
@@ -2408,6 +2449,7 @@ func (p *Proxy) runDTLSSession(sessCtx context.Context, linkID string, readyCh c
 				binary.BigEndian.PutUint64(pingPkt[len(probePingMagic):], seq)
 				dtlsConn.SetWriteDeadline(now.Add(5 * time.Second))
 				if _, err := dtlsConn.Write(pingPkt); err != nil {
+					p.releaseWakeProbeSlot()
 					return
 				}
 				p.lastPingSeq[connIdx].Store(seq)
@@ -2460,10 +2502,12 @@ func (p *Proxy) runDTLSSession(sessCtx context.Context, linkID string, readyCh c
 						pollTimer.Reset(100 * time.Millisecond)
 					case <-connCtx.Done():
 						pollTimer.Stop()
+						p.releaseWakeProbeSlot()
 						return
 					}
 				}
 				pollTimer.Stop()
+				p.releaseWakeProbeSlot()
 				if !echoed {
 					lastPongS := p.lastPongSeq[connIdx].Load()
 					authCount := p.credPool.authErrorCount(credSlot)
@@ -4477,12 +4521,16 @@ func (p *Proxy) runSRTPSession(sessCtx context.Context, linkID string, readyCh c
 						return
 					}
 				}
+				if !p.tryAcquireWakeProbeSlot() {
+					continue
+				}
 				now := time.Now()
 				p.lastActiveProbeAt[connIdx].Store(now.Unix())
 				seq++
 				binary.BigEndian.PutUint64(pingPkt[len(probePingMagic):], seq)
 				_ = srtpConn.SetWriteDeadline(now.Add(5 * time.Second))
 				if _, err := srtpConn.Write(pingPkt); err != nil {
+					p.releaseWakeProbeSlot()
 					return
 				}
 				p.lastPingSeq[connIdx].Store(seq)
@@ -4507,10 +4555,12 @@ func (p *Proxy) runSRTPSession(sessCtx context.Context, linkID string, readyCh c
 						pollTimer.Reset(100 * time.Millisecond)
 					case <-connCtx.Done():
 						pollTimer.Stop()
+						p.releaseWakeProbeSlot()
 						return
 					}
 				}
 				pollTimer.Stop()
+				p.releaseWakeProbeSlot()
 				if !echoed {
 					lastPongS := p.lastPongSeq[connIdx].Load()
 					authCount := p.credPool.authErrorCount(credSlot)

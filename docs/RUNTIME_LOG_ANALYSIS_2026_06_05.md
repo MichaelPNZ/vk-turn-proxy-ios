@@ -207,3 +207,16 @@ Remaining:
 
 - Physical iPhone TestFlight/device smoke is still required because Network Extension tunnel behavior cannot be validated in Simulator.
 - Runtime log export should be rechecked after an on-device session to confirm `api.vk.me` / `login.vk.ru` DNS failures drop.
+
+2026-06-07:
+
+- Added a global concurrent wake-probe limiter in the Go proxy:
+  - cap is `ceil(NumConns/10)`, bounded to `1..6`;
+  - `NumConns=30` now runs at most 3 post-wake active probes at once;
+  - both DTLS and SRTP wake-probe paths use the limiter.
+- Rationale from the same `vpn-export.log`: after wake, multiple active
+  probes timed out in the same window, then many connection workers entered
+  reconnect/dormancy together. The limiter reduces the blast radius of a
+  false-positive or network-wide post-wake probe failure; skipped connections
+  remain covered by the normal timer-based zombie detector and later wakes.
+- Added unit coverage for wake-probe limit sizing and semaphore behavior.
