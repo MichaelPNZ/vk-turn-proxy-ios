@@ -97,7 +97,7 @@ check_github() {
     --branch main \
     --limit 20 \
     --json databaseId,workflowName,status,conclusion,headSha,url \
-    --jq ".[] | select(.workflowName == \"Release Gates\" and .headSha == \"$head\") | [.databaseId, .status, .conclusion, .url] | @tsv" \
+    --jq ".[] | select(.workflowName == \"Release Gates\" and .headSha == \"$head\") | [.databaseId, .status, (if .conclusion == null or .conclusion == \"\" then \"none\" else .conclusion end), .url] | @tsv" \
     | head -1 || true)"
   if [[ -z "$run" ]]; then
     write_status github blocked "release_gates_run_missing_for_head=$head"
