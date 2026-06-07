@@ -17,6 +17,14 @@ scripts/configure-testflight-env.sh \
 ```
 
 The script writes `VKTurnProxy/AppStoreConnect.env` with mode `0600`.
+`scripts/preflight-testflight.sh` and
+`scripts/collect-apple-signing-evidence.sh` require:
+
+- `APPSTORE_KEY_ID`: 10 uppercase alphanumeric characters.
+- `APPSTORE_ISSUER_ID`: UUID.
+- `APPSTORE_KEY_PATH`: absolute path to an existing `.p8` file.
+- `.p8` file content contains `-----BEGIN PRIVATE KEY-----`.
+- `VKTurnProxy/AppStoreConnect.env` file mode is `600`.
 
 ## Required Signing State
 

@@ -5,9 +5,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_DIR="$ROOT_DIR/VKTurnProxy"
 PROJECT_YML="$PROJECT_DIR/project.yml"
 ENV_FILE="$PROJECT_DIR/AppStoreConnect.env"
-PROFILE_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+PROFILE_DIR="${TESTFLIGHT_PROFILE_DIR:-"$HOME/Library/MobileDevice/Provisioning Profiles"}"
 EVIDENCE_DIR="${1:-"$ROOT_DIR/build/evidence/apple-signing-current"}"
 STRICT="${STRICT:-0}"
+ENV_FILE="${TESTFLIGHT_ENV_FILE:-"$ENV_FILE"}"
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -51,6 +52,10 @@ plist_value() {
   local plist="$1"
   local key="$2"
   /usr/libexec/PlistBuddy -c "Print :$key" "$plist" 2>/dev/null || true
+}
+
+file_mode() {
+  stat -f%Lp "$1" 2>/dev/null || stat -c%a "$1" 2>/dev/null || true
 }
 
 profile_app_id() {
@@ -110,8 +115,29 @@ fi
       printf 'APPSTORE_KEY_PATH_EXISTS=no\n'
       blocker "APPSTORE_KEY_PATH is missing in $ENV_FILE"
     fi
-    [[ -n "${APPSTORE_KEY_ID:-}" ]] || blocker "APPSTORE_KEY_ID is missing in $ENV_FILE"
-    [[ -n "${APPSTORE_ISSUER_ID:-}" ]] || blocker "APPSTORE_ISSUER_ID is missing in $ENV_FILE"
+    if [[ -z "${APPSTORE_KEY_ID:-}" ]]; then
+      blocker "APPSTORE_KEY_ID is missing in $ENV_FILE"
+    elif [[ ! "$APPSTORE_KEY_ID" =~ ^[A-Z0-9]{10}$ ]]; then
+      blocker "APPSTORE_KEY_ID must be a 10-character App Store Connect key id"
+    fi
+    if [[ -z "${APPSTORE_ISSUER_ID:-}" ]]; then
+      blocker "APPSTORE_ISSUER_ID is missing in $ENV_FILE"
+    elif [[ ! "$APPSTORE_ISSUER_ID" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]]; then
+      blocker "APPSTORE_ISSUER_ID must be a UUID"
+    fi
+    if [[ -n "${APPSTORE_KEY_PATH:-}" && "$APPSTORE_KEY_PATH" != /* ]]; then
+      blocker "APPSTORE_KEY_PATH must be absolute"
+    fi
+    if [[ -n "${APPSTORE_KEY_PATH:-}" && -f "$APPSTORE_KEY_PATH" ]]; then
+      if ! grep -q -- '-----BEGIN PRIVATE KEY-----' "$APPSTORE_KEY_PATH"; then
+        blocker "APPSTORE_KEY_PATH does not look like an App Store Connect .p8 private key"
+      fi
+    fi
+    env_mode="$(file_mode "$ENV_FILE")"
+    printf 'FILE_MODE=%s\n' "${env_mode:-unknown}"
+    if [[ -n "$env_mode" && "$env_mode" != "600" ]]; then
+      blocker "$ENV_FILE must have file mode 600"
+    fi
   else
     printf 'file=missing\n'
     blocker "$ENV_FILE is missing"

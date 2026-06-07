@@ -5,10 +5,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT_DIR="$ROOT_DIR/VKTurnProxy"
 PROJECT_FILE="$PROJECT_DIR/VKTurnProxy.xcodeproj"
 PROJECT_YML="$PROJECT_DIR/project.yml"
-ENV_FILE="$PROJECT_DIR/AppStoreConnect.env"
+ENV_FILE="${TESTFLIGHT_ENV_FILE:-"$PROJECT_DIR/AppStoreConnect.env"}"
 TAG="${1:-}"
 ALLOW_EXTERNAL_BLOCKERS="${ALLOW_EXTERNAL_BLOCKERS:-0}"
-PROFILE_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+PROFILE_DIR="${TESTFLIGHT_PROFILE_DIR:-"$HOME/Library/MobileDevice/Provisioning Profiles"}"
 TEAM_ID="$(awk '/DEVELOPMENT_TEAM:/ {print $NF; exit}' "$PROJECT_YML" 2>/dev/null || true)"
 
 failures=0
@@ -37,6 +37,10 @@ contains() {
   local file="$1"
   local needle="$2"
   [[ -f "$file" ]] && grep -qF "$needle" "$file"
+}
+
+file_mode() {
+  stat -f%Lp "$1" 2>/dev/null || stat -c%a "$1" 2>/dev/null || true
 }
 
 bundle_ids() {
@@ -270,17 +274,51 @@ if [[ -f "$ENV_FILE" ]]; then
   pass "AppStoreConnect.env found"
   # shellcheck disable=SC1090
   source "$ENV_FILE"
-  for var in APPSTORE_KEY_ID APPSTORE_ISSUER_ID APPSTORE_KEY_PATH; do
-    if [[ -n "${!var:-}" ]]; then
-      pass "$var is set"
+  if [[ -n "${APPSTORE_KEY_ID:-}" ]]; then
+    pass "APPSTORE_KEY_ID is set"
+    if [[ "$APPSTORE_KEY_ID" =~ ^[A-Z0-9]{10}$ ]]; then
+      pass "APPSTORE_KEY_ID format is valid"
     else
-      external_blocker "$ENV_FILE missing $var"
+      external_blocker "APPSTORE_KEY_ID must be a 10-character App Store Connect key id"
     fi
-  done
+  else
+    external_blocker "$ENV_FILE missing APPSTORE_KEY_ID"
+  fi
+  if [[ -n "${APPSTORE_ISSUER_ID:-}" ]]; then
+    pass "APPSTORE_ISSUER_ID is set"
+    if [[ "$APPSTORE_ISSUER_ID" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]]; then
+      pass "APPSTORE_ISSUER_ID format is valid"
+    else
+      external_blocker "APPSTORE_ISSUER_ID must be a UUID"
+    fi
+  else
+    external_blocker "$ENV_FILE missing APPSTORE_ISSUER_ID"
+  fi
+  if [[ -n "${APPSTORE_KEY_PATH:-}" ]]; then
+    pass "APPSTORE_KEY_PATH is set"
+    if [[ "$APPSTORE_KEY_PATH" == /* ]]; then
+      pass "APPSTORE_KEY_PATH is absolute"
+    else
+      external_blocker "APPSTORE_KEY_PATH must be absolute"
+    fi
+  else
+    external_blocker "$ENV_FILE missing APPSTORE_KEY_PATH"
+  fi
   if [[ -n "${APPSTORE_KEY_PATH:-}" && -f "$APPSTORE_KEY_PATH" ]]; then
     pass "APPSTORE_KEY_PATH exists"
+    if grep -q -- '-----BEGIN PRIVATE KEY-----' "$APPSTORE_KEY_PATH"; then
+      pass "APPSTORE_KEY_PATH private key header found"
+    else
+      external_blocker "APPSTORE_KEY_PATH does not look like an App Store Connect .p8 private key"
+    fi
   else
     external_blocker "APPSTORE_KEY_PATH does not exist: ${APPSTORE_KEY_PATH:-unset}"
+  fi
+  env_mode="$(file_mode "$ENV_FILE")"
+  if [[ "$env_mode" == "600" ]]; then
+    pass "AppStoreConnect.env mode is 600"
+  else
+    external_blocker "$ENV_FILE must have file mode 600 (current: ${env_mode:-unknown})"
   fi
 else
   external_blocker "$ENV_FILE missing; TestFlight upload cannot run"
