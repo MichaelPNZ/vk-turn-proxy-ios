@@ -13,6 +13,7 @@ Evidence types:
   iphone_testflight_network_extension
   macos_testflight_packet_tunnel
   windows_installer_smoke
+  server_public_smoke
   server_production_baseline
   server_production_smoke
 
@@ -23,7 +24,7 @@ EOF
 }
 
 case "$EVIDENCE_TYPE" in
-  iphone_testflight_network_extension|macos_testflight_packet_tunnel|windows_installer_smoke|server_production_baseline|server_production_smoke) ;;
+  iphone_testflight_network_extension|macos_testflight_packet_tunnel|windows_installer_smoke|server_public_smoke|server_production_baseline|server_production_smoke) ;;
   -h|--help|help|"") usage; exit 64 ;;
   *) echo "Unsupported evidence type: $EVIDENCE_TYPE" >&2; usage; exit 64 ;;
 esac

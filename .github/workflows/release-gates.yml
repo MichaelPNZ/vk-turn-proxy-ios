@@ -103,6 +103,13 @@ jobs:
           done
           scripts/test-release-manifest-format.sh
           scripts/test-server-deploy-safety.sh
+          scripts/test-server-public-smoke-evidence-contract.sh
+          scripts/test-android-physical-evidence-contract.sh
+          scripts/test-windows-runtime-evidence-contract.sh
+          scripts/test-windows-installer-evidence-contract.sh
+          scripts/test-apple-signing-evidence-contract.sh
+          scripts/test-apple-smoke-evidence-contract.sh
+          scripts/test-server-production-evidence-contract.sh
           TAG="$TAG" scripts/test-external-smoke-kit.sh
           scripts/test-windows-installer-packaging.sh
 

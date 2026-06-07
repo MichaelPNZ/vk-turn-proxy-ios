@@ -490,6 +490,7 @@ check_shell_syntax \
   scripts/collect-apple-smoke-evidence.sh \
   scripts/configure-github-testflight-secrets.sh \
   scripts/collect-server-production-evidence.sh \
+  scripts/collect-server-public-smoke-evidence.sh \
   scripts/diagnose-apple-signing.sh \
   scripts/install-apple-signing-assets.sh \
   scripts/build-windows-service.sh \
@@ -502,6 +503,7 @@ check_shell_syntax \
   scripts/package-server.sh \
   scripts/package-windows-runtime.sh \
   scripts/test-server-deploy-safety.sh \
+  scripts/test-server-public-smoke-evidence-contract.sh \
   scripts/test-android-physical-evidence-contract.sh \
   scripts/test-windows-runtime-evidence-contract.sh \
   scripts/test-windows-installer-evidence-contract.sh \
@@ -521,6 +523,7 @@ check_shell_syntax \
 run_required "git diff hygiene" git diff --check
 run_required "release manifest format test" scripts/test-release-manifest-format.sh
 run_required "server deploy safety test" scripts/test-server-deploy-safety.sh
+run_required "server public smoke evidence contract test" scripts/test-server-public-smoke-evidence-contract.sh
 run_required "android physical evidence contract test" scripts/test-android-physical-evidence-contract.sh
 run_required "windows runtime evidence contract test" scripts/test-windows-runtime-evidence-contract.sh
 run_required "windows installer evidence contract test" scripts/test-windows-installer-evidence-contract.sh

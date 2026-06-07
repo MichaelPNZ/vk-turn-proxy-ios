@@ -78,6 +78,13 @@ Before promoting production `56004`, run one client against a public second port
 Use the public smoke helper:
 
 ```bash
+scripts/collect-server-public-smoke-evidence.sh \
+  build/evidence/server-public-smoke-$(date +%Y%m%d-%H%M%S)
+```
+
+For manual step-by-step control:
+
+```bash
 ACTION=start \
   SSH_USER=root \
   HOST=142.252.220.91 \

@@ -44,6 +44,7 @@ check_shell_syntax \
   scripts/collect-apple-smoke-evidence.sh \
   scripts/configure-github-testflight-secrets.sh \
   scripts/collect-server-production-evidence.sh \
+  scripts/collect-server-public-smoke-evidence.sh \
   scripts/diagnose-apple-signing.sh \
   scripts/build-windows-service.sh \
   scripts/deploy-server-vps.sh \
@@ -56,6 +57,7 @@ check_shell_syntax \
   scripts/package-server.sh \
   scripts/package-windows-runtime.sh \
   scripts/test-server-deploy-safety.sh \
+  scripts/test-server-public-smoke-evidence-contract.sh \
   scripts/test-android-physical-evidence-contract.sh \
   scripts/test-windows-runtime-evidence-contract.sh \
   scripts/test-windows-installer-evidence-contract.sh \
@@ -75,6 +77,7 @@ check_shell_syntax \
 run git diff --check
 run scripts/test-release-manifest-format.sh
 run scripts/test-server-deploy-safety.sh
+run scripts/test-server-public-smoke-evidence-contract.sh
 run scripts/test-android-physical-evidence-contract.sh
 run scripts/test-windows-runtime-evidence-contract.sh
 run scripts/test-windows-installer-evidence-contract.sh
