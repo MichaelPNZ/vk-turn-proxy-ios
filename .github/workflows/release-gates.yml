@@ -35,7 +35,7 @@ jobs:
           if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "${GITHUB_REF_NAME:-}" =~ build[0-9]+$ ]]; then
             tag="$GITHUB_REF_NAME"
           else
-            tag="v1.0-build156"
+            tag="v1.0-build157"
           fi
           echo "TAG=$tag" >> "$GITHUB_ENV"
           echo "Using TAG=$tag"
@@ -102,6 +102,7 @@ jobs:
             bash -n "$script"
           done
           scripts/test-release-manifest-format.sh
+          scripts/test-release-tag-alignment.sh
           scripts/test-server-deploy-safety.sh
           scripts/test-server-public-smoke-evidence-contract.sh
           scripts/test-android-physical-evidence-contract.sh

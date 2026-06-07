@@ -38,6 +38,7 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 source "$SCRIPT_DIR/scripts/release-manifest-lib.sh"
+source "$SCRIPT_DIR/scripts/release-tag-lib.sh"
 
 if [[ -t 1 ]]; then
     BOLD=$'\033[1m'; CYAN=$'\033[36m'; GREEN=$'\033[32m'; RED=$'\033[31m'; RESET=$'\033[0m'
@@ -216,11 +217,17 @@ if [[ -n "$(git status --porcelain)" ]]; then
     exit 1
 fi
 
-if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-    fail "Tag $TAG does not exist locally."
-    fail "Create it first: git tag -a $TAG -m '...' && git push origin $TAG"
+tag_detail=""
+if ! tag_detail="$(release_tag_alignment_detail "$SCRIPT_DIR" "$TAG")"; then
+    fail "$tag_detail"
+    if [[ "$tag_detail" == tag_missing=* ]]; then
+        fail "Create it first: git tag -a $TAG -m '...' && git push origin $TAG"
+    else
+        fail "Create a new build tag on the current commit instead of uploading an older tag."
+    fi
     exit 1
 fi
+ok "$tag_detail"
 
 require_build_numbers_match_tag
 

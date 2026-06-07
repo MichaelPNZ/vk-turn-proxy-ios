@@ -6,6 +6,7 @@ TAG="${1:-}"
 ANDROID_HOME="${ANDROID_HOME:-"$HOME/Library/Android/sdk"}"
 ALLOW_EXTERNAL_BLOCKERS="${ALLOW_EXTERNAL_BLOCKERS:-0}"
 BUILD_NUM=""
+source "$ROOT_DIR/scripts/release-tag-lib.sh"
 
 failures=0
 warnings=0
@@ -481,6 +482,15 @@ require_manifest() {
   run_required "cross-platform checksum manifest verifies" shasum -a 256 -c "$manifest"
 }
 
+require_tag_points_to_head() {
+  local tag_detail
+  if tag_detail="$(release_tag_alignment_detail "$ROOT_DIR" "$TAG")"; then
+    pass "$tag_detail"
+  else
+    fail "$tag_detail"
+  fi
+}
+
 if [[ -z "$TAG" || "$TAG" == "-h" || "$TAG" == "--help" || "$TAG" == "help" ]]; then
   usage
   exit 64
@@ -518,8 +528,10 @@ check_shell_syntax \
   scripts/release-blockers-status.sh \
   scripts/package-server.sh \
   scripts/package-windows-runtime.sh \
+  scripts/release-tag-lib.sh \
   scripts/test-server-deploy-safety.sh \
   scripts/test-server-public-smoke-evidence-contract.sh \
+  scripts/test-release-tag-alignment.sh \
   scripts/test-android-physical-evidence-contract.sh \
   scripts/test-windows-runtime-evidence-contract.sh \
   scripts/test-windows-installer-evidence-contract.sh \
@@ -538,7 +550,10 @@ check_shell_syntax \
   scripts/write-smoke-evidence-summary.sh
 
 run_required "git diff hygiene" git diff --check
+printf '\n==> release tag points to current HEAD\n'
+require_tag_points_to_head
 run_required "release manifest format test" scripts/test-release-manifest-format.sh
+run_required "release tag alignment test" scripts/test-release-tag-alignment.sh
 run_required "server deploy safety test" scripts/test-server-deploy-safety.sh
 run_required "server public smoke evidence contract test" scripts/test-server-public-smoke-evidence-contract.sh
 run_required "android physical evidence contract test" scripts/test-android-physical-evidence-contract.sh

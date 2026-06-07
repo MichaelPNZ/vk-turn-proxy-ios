@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TAG="${1:-v1.0-build156}"
+TAG="${1:-v1.0-build157}"
 ANDROID_HOME="${ANDROID_HOME:-"$HOME/Library/Android/sdk"}"
 HOST="${HOST:-142.252.220.91}"
 SSH_USER="${SSH_USER:-root}"
@@ -10,6 +10,8 @@ RUN_APPLE_SIGNING="${RUN_APPLE_SIGNING:-1}"
 RUN_SERVER_BASELINE="${RUN_SERVER_BASELINE:-1}"
 RUN_GITHUB="${RUN_GITHUB:-1}"
 OUT_DIR="${OUT_DIR:-"$ROOT_DIR/build/release-status/$TAG"}"
+
+source "$ROOT_DIR/scripts/release-tag-lib.sh"
 
 mkdir -p "$OUT_DIR"
 
@@ -196,10 +198,11 @@ check_git() {
   else
     write_status git ready "working_tree=clean"
   fi
-  if git -C "$ROOT_DIR" rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
-    write_status git ready "tag_exists=$TAG"
+  local tag_detail
+  if tag_detail="$(release_tag_alignment_detail "$ROOT_DIR" "$TAG")"; then
+    write_status git ready "$tag_detail"
   else
-    write_status git blocked "tag_missing=$TAG"
+    write_status git blocked "$tag_detail"
   fi
 }
 
@@ -221,8 +224,7 @@ check_github() {
   head="$(git -C "$ROOT_DIR" rev-parse HEAD)"
   run="$(gh run list \
     --repo MichaelPNZ/vk-turn-proxy-ios \
-    --branch main \
-    --limit 20 \
+    --limit 50 \
     --json databaseId,workflowName,status,conclusion,headSha,url \
     --jq ".[] | select(.workflowName == \"Release Gates\" and .headSha == \"$head\") | [.databaseId, .status, (if .conclusion == null or .conclusion == \"\" then \"none\" else .conclusion end), .url] | @tsv" \
     | head -1 || true)"

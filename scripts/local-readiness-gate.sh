@@ -8,7 +8,7 @@ RUN_VPS_DRY_RUN="${RUN_VPS_DRY_RUN:-0}"
 RUN_ANDROID_RELEASE_SMOKE="${RUN_ANDROID_RELEASE_SMOKE:-0}"
 HOST="${HOST:-142.252.220.91}"
 SSH_USER="${SSH_USER:-root}"
-TAG="${TAG:-v1.0-build156}"
+TAG="${TAG:-v1.0-build157}"
 
 banner() {
   printf '\n==> %s\n' "$*"
@@ -54,10 +54,12 @@ check_shell_syntax \
   scripts/prepare-external-smoke-kit.sh \
   scripts/release-blockers-status.sh \
   scripts/release-manifest-lib.sh \
+  scripts/release-tag-lib.sh \
   scripts/package-server.sh \
   scripts/package-windows-runtime.sh \
   scripts/test-server-deploy-safety.sh \
   scripts/test-server-public-smoke-evidence-contract.sh \
+  scripts/test-release-tag-alignment.sh \
   scripts/test-android-physical-evidence-contract.sh \
   scripts/test-windows-runtime-evidence-contract.sh \
   scripts/test-windows-installer-evidence-contract.sh \
@@ -77,6 +79,7 @@ check_shell_syntax \
 
 run git diff --check
 run scripts/test-release-manifest-format.sh
+run scripts/test-release-tag-alignment.sh
 run scripts/test-server-deploy-safety.sh
 run scripts/test-server-public-smoke-evidence-contract.sh
 run scripts/test-android-physical-evidence-contract.sh
