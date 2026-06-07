@@ -250,6 +250,70 @@ require_android_physical_evidence() {
   pass "ANDROID_PHYSICAL_SMOKE_EVIDENCE passed physical-device summary: $value"
 }
 
+require_apple_smoke_evidence() {
+  local env_name="$1"
+  local evidence_type="$2"
+  local mode="$3"
+  local description="$4"
+  local value="${!env_name:-}"
+  if [[ -z "$value" ]]; then
+    external_blocker "$env_name is not set ($description)"
+    return
+  fi
+  if [[ ! -d "$value" ]]; then
+    external_blocker "$env_name must be an evidence directory: $value"
+    return
+  fi
+  local summary="$value/summary.txt"
+  if [[ ! -f "$summary" ]]; then
+    external_blocker "$env_name missing summary.txt: $summary"
+    return
+  fi
+  if ! grep -q '^result=passed$' "$summary"; then
+    external_blocker "$env_name summary does not contain result=passed: $summary"
+    return
+  fi
+  if ! grep -q "^evidence_type=$evidence_type$" "$summary"; then
+    external_blocker "$env_name summary does not contain evidence_type=$evidence_type: $summary"
+    return
+  fi
+  if [[ "$(summary_txt_value "$summary" apple_smoke_mode)" != "$mode" ]]; then
+    external_blocker "$env_name summary must contain apple_smoke_mode=$mode: $summary"
+    return
+  fi
+  if [[ "$(summary_txt_value "$summary" connected_cleanly)" != "1" ]]; then
+    external_blocker "$env_name summary must contain connected_cleanly=1: $summary"
+    return
+  fi
+  if [[ "$(summary_txt_value "$summary" disconnected_cleanly)" != "1" ]]; then
+    external_blocker "$env_name summary must contain disconnected_cleanly=1: $summary"
+    return
+  fi
+  local attachment_count supporting_count provided_count
+  attachment_count="$(summary_txt_value "$summary" attachment_count)"
+  supporting_count="$(summary_txt_value "$summary" supporting_evidence_file_count)"
+  provided_count="$(summary_txt_value "$summary" provided_file_count)"
+  if [[ ! "$attachment_count" =~ ^[1-9][0-9]*$ ]]; then
+    external_blocker "$env_name summary must contain attachment_count > 0: $summary"
+    return
+  fi
+  if [[ ! "$supporting_count" =~ ^[1-9][0-9]*$ ]]; then
+    external_blocker "$env_name summary must contain supporting_evidence_file_count > 0: $summary"
+    return
+  fi
+  if [[ "$mode" == "iphone" && ! "$provided_count" =~ ^[1-9][0-9]*$ ]]; then
+    external_blocker "$env_name iPhone evidence requires provided_file_count > 0: $summary"
+    return
+  fi
+  local actual_supporting_count
+  actual_supporting_count="$(find "$value" -maxdepth 1 -type f ! -name summary.txt ! -name notes.txt | wc -l | tr -d ' ')"
+  if [[ "$actual_supporting_count" -lt 1 ]]; then
+    external_blocker "$env_name must include at least one supporting evidence file besides summary.txt/notes.txt: $value"
+    return
+  fi
+  pass "$env_name passed Apple smoke evidence contract: $value"
+}
+
 require_server_production_evidence() {
   local value="${SERVER_PRODUCTION_SMOKE_EVIDENCE:-}"
   if [[ -z "$value" ]]; then
@@ -381,6 +445,7 @@ check_shell_syntax \
   scripts/test-server-deploy-safety.sh \
   scripts/test-android-physical-evidence-contract.sh \
   scripts/test-windows-runtime-evidence-contract.sh \
+  scripts/test-apple-smoke-evidence-contract.sh \
   scripts/test-server-production-evidence-contract.sh \
   scripts/test-external-smoke-kit.sh \
   scripts/test-windows-installer-packaging.sh \
@@ -397,6 +462,7 @@ run_required "release manifest format test" scripts/test-release-manifest-format
 run_required "server deploy safety test" scripts/test-server-deploy-safety.sh
 run_required "android physical evidence contract test" scripts/test-android-physical-evidence-contract.sh
 run_required "windows runtime evidence contract test" scripts/test-windows-runtime-evidence-contract.sh
+run_required "apple smoke evidence contract test" scripts/test-apple-smoke-evidence-contract.sh
 run_required "server production evidence contract test" scripts/test-server-production-evidence-contract.sh
 run_required "external smoke kit test" scripts/test-external-smoke-kit.sh
 run_required "windows installer packaging test" scripts/test-windows-installer-packaging.sh
@@ -426,8 +492,8 @@ fi
 
 printf '\n==> External runtime evidence\n'
 require_android_physical_evidence
-require_summary_txt_evidence IPHONE_TESTFLIGHT_SMOKE_EVIDENCE iphone_testflight_network_extension "iPhone TestFlight Network Extension smoke"
-require_summary_txt_evidence MACOS_TESTFLIGHT_SMOKE_EVIDENCE macos_testflight_packet_tunnel "signed macOS Packet Tunnel smoke"
+require_apple_smoke_evidence IPHONE_TESTFLIGHT_SMOKE_EVIDENCE iphone_testflight_network_extension iphone "iPhone TestFlight Network Extension smoke"
+require_apple_smoke_evidence MACOS_TESTFLIGHT_SMOKE_EVIDENCE macos_testflight_packet_tunnel macos "signed macOS Packet Tunnel smoke"
 require_windows_runtime_evidence
 require_summary_txt_evidence WINDOWS_INSTALLER_SMOKE_EVIDENCE windows_installer_smoke "Windows EXE build/sign/install smoke"
 require_server_production_evidence

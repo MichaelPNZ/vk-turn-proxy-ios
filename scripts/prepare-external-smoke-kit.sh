@@ -132,6 +132,8 @@ fi
   iphone \
   "$EVIDENCE_DIR" \
   --file "$FILE" \
+  --connected-cleanly \
+  --disconnected-cleanly \
   --note "iPhone TestFlight Network Extension connected and disconnected cleanly"
 
 printf 'IPHONE_TESTFLIGHT_SMOKE_EVIDENCE=%s\n' "$EVIDENCE_DIR"
@@ -149,6 +151,8 @@ EVIDENCE_DIR="${EVIDENCE_DIR:-"$ROOT_DIR/build/evidence/macos-testflight-$STAMP"
 "$ROOT_DIR/scripts/collect-apple-smoke-evidence.sh" \
   macos \
   "$EVIDENCE_DIR" \
+  --connected-cleanly \
+  --disconnected-cleanly \
   --last "${LAST:-30m}" \
   --note "Signed macOS Packet Tunnel connected and disconnected cleanly"
 

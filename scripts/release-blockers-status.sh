@@ -60,6 +60,27 @@ has_summary_type_passed() {
     grep -q "^evidence_type=$evidence_type$" "$dir/summary.txt"
 }
 
+has_apple_smoke_passed() {
+  local dir="$1"
+  local evidence_type="$2"
+  local mode="$3"
+  local summary="$dir/summary.txt"
+  [[ -f "$summary" ]] || return 1
+  grep -q '^result=passed$' "$summary" || return 1
+  grep -q "^evidence_type=$evidence_type$" "$summary" || return 1
+  [[ "$(summary_value "$summary" apple_smoke_mode)" == "$mode" ]] || return 1
+  [[ "$(summary_value "$summary" connected_cleanly)" == "1" ]] || return 1
+  [[ "$(summary_value "$summary" disconnected_cleanly)" == "1" ]] || return 1
+  [[ "$(summary_value "$summary" attachment_count)" =~ ^[1-9][0-9]*$ ]] || return 1
+  [[ "$(summary_value "$summary" supporting_evidence_file_count)" =~ ^[1-9][0-9]*$ ]] || return 1
+  if [[ "$mode" == "iphone" ]]; then
+    [[ "$(summary_value "$summary" provided_file_count)" =~ ^[1-9][0-9]*$ ]] || return 1
+  fi
+  local actual_supporting_count
+  actual_supporting_count="$(find "$dir" -maxdepth 1 -type f ! -name summary.txt ! -name notes.txt | wc -l | tr -d ' ')"
+  [[ "$actual_supporting_count" -gt 0 ]] || return 1
+}
+
 has_android_physical_smoke_passed() {
   local dir="$1"
   local summary="$dir/summary.txt"
@@ -254,37 +275,37 @@ check_android_physical() {
 check_apple() {
   if [[ "$RUN_APPLE_SIGNING" != "1" ]]; then
     write_status apple skipped "RUN_APPLE_SIGNING=0"
-    return
-  fi
-  local evidence="$OUT_DIR/apple-signing"
-  if scripts/collect-apple-signing-evidence.sh "$evidence" > "$OUT_DIR/apple-signing-command.txt" 2>&1; then
-    :
   else
-    write_status apple blocked "apple_signing_collector_failed output=$OUT_DIR/apple-signing-command.txt"
-    return
-  fi
-  local result blockers ready
-  result="$(summary_value "$evidence/summary.txt" result)"
-  blockers="$(summary_value "$evidence/summary.txt" blocker_count)"
-  ready="$(summary_value "$evidence/summary.txt" testflight_ready)"
-  if [[ "$result" == "passed" && "$ready" == "true" ]]; then
-    write_status apple ready "testflight_signing_ready blockers=$blockers"
-  else
-    write_status apple blocked "testflight_signing_not_ready blockers=${blockers:-unknown} evidence=$evidence"
+    local evidence="$OUT_DIR/apple-signing"
+    if scripts/collect-apple-signing-evidence.sh "$evidence" > "$OUT_DIR/apple-signing-command.txt" 2>&1; then
+      :
+    else
+      write_status apple blocked "apple_signing_collector_failed output=$OUT_DIR/apple-signing-command.txt"
+      return
+    fi
+    local result blockers ready
+    result="$(summary_value "$evidence/summary.txt" result)"
+    blockers="$(summary_value "$evidence/summary.txt" blocker_count)"
+    ready="$(summary_value "$evidence/summary.txt" testflight_ready)"
+    if [[ "$result" == "passed" && "$ready" == "true" ]]; then
+      write_status apple ready "testflight_signing_ready blockers=$blockers"
+    else
+      write_status apple blocked "testflight_signing_not_ready blockers=${blockers:-unknown} evidence=$evidence"
+    fi
   fi
 
   if [[ -n "${IPHONE_TESTFLIGHT_SMOKE_EVIDENCE:-}" ]] &&
-    has_summary_type_passed "$IPHONE_TESTFLIGHT_SMOKE_EVIDENCE" iphone_testflight_network_extension; then
+    has_apple_smoke_passed "$IPHONE_TESTFLIGHT_SMOKE_EVIDENCE" iphone_testflight_network_extension iphone; then
     write_status apple ready "iphone_testflight_smoke=$IPHONE_TESTFLIGHT_SMOKE_EVIDENCE"
   else
-    write_status apple blocked "IPHONE_TESTFLIGHT_SMOKE_EVIDENCE_missing_or_not_passed"
+    write_status apple blocked "IPHONE_TESTFLIGHT_SMOKE_EVIDENCE_missing_or_contract_failed"
   fi
 
   if [[ -n "${MACOS_TESTFLIGHT_SMOKE_EVIDENCE:-}" ]] &&
-    has_summary_type_passed "$MACOS_TESTFLIGHT_SMOKE_EVIDENCE" macos_testflight_packet_tunnel; then
+    has_apple_smoke_passed "$MACOS_TESTFLIGHT_SMOKE_EVIDENCE" macos_testflight_packet_tunnel macos; then
     write_status apple ready "macos_testflight_smoke=$MACOS_TESTFLIGHT_SMOKE_EVIDENCE"
   else
-    write_status apple blocked "MACOS_TESTFLIGHT_SMOKE_EVIDENCE_missing_or_not_passed"
+    write_status apple blocked "MACOS_TESTFLIGHT_SMOKE_EVIDENCE_missing_or_contract_failed"
   fi
 }
 

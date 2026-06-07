@@ -291,7 +291,7 @@ Current verification:
 - `scripts/configure-testflight-env.sh` creates ignored local `VKTurnProxy/AppStoreConnect.env` with mode `0600`; `docs/TESTFLIGHT_SETUP.md` documents the remaining Apple setup flow.
 - `scripts/diagnose-apple-signing.sh` reports bundle ids, App Store Connect env state, keychain identities, revoked identities, and provisioning profile matches without mutating keychain/profile state.
 - `scripts/build-apple-release-local.sh all` verifies unsigned iOS and macOS Release builds before signing/TestFlight upload.
-- `scripts/final-release-readiness.sh <tag>` requires iPhone TestFlight Network Extension smoke evidence and signed macOS Packet Tunnel smoke evidence before final release readiness can pass.
+- `scripts/final-release-readiness.sh <tag>` requires strict iPhone TestFlight Network Extension smoke evidence and signed macOS Packet Tunnel smoke evidence before final release readiness can pass: both must include clean connect/disconnect markers and supporting evidence files, not only a summary.
 - `scripts/build-apple-release-local.sh macos` passed after adding the macOS diagnostics panel.
 - Local Release gate passed after adding macOS x86_64 slices to both `WireGuardTURN.xcframework` and `VKTurnShared.xcframework`.
 - `scripts/local-readiness-gate.sh` passed with `RUN_APPLE_RELEASE=1` and `RUN_VPS_DRY_RUN=0`.

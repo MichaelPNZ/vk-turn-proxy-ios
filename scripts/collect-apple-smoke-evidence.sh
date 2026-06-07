@@ -9,12 +9,16 @@ shift $(( $# >= 2 ? 2 : $# ))
 LAST="${LAST:-30m}"
 FILES=()
 NOTES=()
+CONNECTED_CLEANLY=0
+DISCONNECTED_CLEANLY=0
+MACOS_SYSTEM_LOG_COLLECTED=0
+MACOS_APPGROUP_LOG_COUNT=0
 
 usage() {
   cat >&2 <<'EOF'
 Usage:
-  scripts/collect-apple-smoke-evidence.sh iphone <evidence-dir> --file <path> [--note <text>]
-  scripts/collect-apple-smoke-evidence.sh macos <evidence-dir> [--file <path>] [--note <text>] [--last <duration>]
+  scripts/collect-apple-smoke-evidence.sh iphone <evidence-dir> --file <path> --connected-cleanly --disconnected-cleanly [--note <text>]
+  scripts/collect-apple-smoke-evidence.sh macos <evidence-dir> --connected-cleanly --disconnected-cleanly [--file <path>] [--note <text>] [--last <duration>]
 
 Modes:
   iphone  Collect supporting files exported from a real iPhone TestFlight /
@@ -68,6 +72,8 @@ collect_macos_logs() {
       > "$system_log" 2>"$EVIDENCE_DIR/macos-system-log.stderr" || true
     if [[ ! -s "$system_log" ]]; then
       rm -f "$system_log"
+    else
+      MACOS_SYSTEM_LOG_COLLECTED=1
     fi
     if [[ ! -s "$EVIDENCE_DIR/macos-system-log.stderr" ]]; then
       rm -f "$EVIDENCE_DIR/macos-system-log.stderr"
@@ -78,8 +84,13 @@ collect_macos_logs() {
   for log_file in "$group_dir/vpn.log" "$group_dir/vpn.log.1"; do
     if [[ -f "$log_file" ]]; then
       copy_supporting_file "$log_file" "appgroup"
+      MACOS_APPGROUP_LOG_COUNT=$((MACOS_APPGROUP_LOG_COUNT + 1))
     fi
   done
+}
+
+supporting_evidence_file_count() {
+  find "$EVIDENCE_DIR" -maxdepth 1 -type f ! -name summary.txt ! -name notes.txt | wc -l | tr -d ' '
 }
 
 while [[ $# -gt 0 ]]; do
@@ -98,6 +109,14 @@ while [[ $# -gt 0 ]]; do
       [[ $# -ge 2 ]] || { usage; exit 64; }
       LAST="$2"
       shift 2
+      ;;
+    --connected-cleanly)
+      CONNECTED_CLEANLY=1
+      shift
+      ;;
+    --disconnected-cleanly)
+      DISCONNECTED_CLEANLY=1
+      shift
       ;;
     -h|--help|help)
       usage
@@ -124,6 +143,16 @@ fi
 
 mkdir -p "$EVIDENCE_DIR"
 
+if [[ "$CONNECTED_CLEANLY" != "1" || "$DISCONNECTED_CLEANLY" != "1" ]]; then
+  echo "Apple smoke evidence requires --connected-cleanly and --disconnected-cleanly." >&2
+  exit 64
+fi
+
+if [[ "$MODE" == "iphone" && "${#FILES[@]}" -eq 0 ]]; then
+  echo "iPhone TestFlight evidence requires at least one --file exported from the real device smoke." >&2
+  exit 64
+fi
+
 if (( ${#FILES[@]} > 0 )); then
   for file in "${FILES[@]}"; do
     copy_supporting_file "$file"
@@ -142,4 +171,14 @@ case "$MODE" in
 esac
 
 "$ROOT_DIR/scripts/write-smoke-evidence-summary.sh" "$evidence_type" "$EVIDENCE_DIR"
+cat >> "$EVIDENCE_DIR/summary.txt" <<EOF
+apple_smoke_mode=$MODE
+connected_cleanly=$CONNECTED_CLEANLY
+disconnected_cleanly=$DISCONNECTED_CLEANLY
+provided_file_count=${#FILES[@]}
+notes_count=${#NOTES[@]}
+supporting_evidence_file_count=$(supporting_evidence_file_count)
+macos_system_log_collected=$MACOS_SYSTEM_LOG_COLLECTED
+macos_appgroup_log_count=$MACOS_APPGROUP_LOG_COUNT
+EOF
 printf 'evidence_dir=%s\n' "$EVIDENCE_DIR"
