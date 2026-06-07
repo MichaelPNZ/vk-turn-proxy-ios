@@ -8,7 +8,7 @@ RUN_VPS_DRY_RUN="${RUN_VPS_DRY_RUN:-0}"
 RUN_ANDROID_RELEASE_SMOKE="${RUN_ANDROID_RELEASE_SMOKE:-0}"
 HOST="${HOST:-142.252.220.91}"
 SSH_USER="${SSH_USER:-root}"
-TAG="${TAG:-v1.0-build158}"
+TAG="${TAG:-v1.0-build159}"
 
 banner() {
   printf '\n==> %s\n' "$*"

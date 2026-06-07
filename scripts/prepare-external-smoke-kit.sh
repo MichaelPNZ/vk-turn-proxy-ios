@@ -59,6 +59,12 @@ Use it to collect final evidence for Android physical-device, iPhone TestFlight,
 signed macOS Packet Tunnel, Windows runtime/installer, and production
 server/client smoke gates.
 
+Download CI artifacts:
+
+\`\`\`bash
+"$OUT_DIR/commands/download-ci-artifacts.sh"
+\`\`\`
+
 Apple TestFlight secrets dry-run:
 
 \`\`\`bash
@@ -139,6 +145,75 @@ EOF
 fi
 SH
 chmod +x "$OUT_DIR/commands/apple-testflight-secrets.sh"
+
+cat > "$OUT_DIR/commands/download-ci-artifacts.sh" <<SH
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")/../../../.." && pwd)"
+REPO="\${REPO:-MichaelPNZ/vk-turn-proxy-ios}"
+TAG="\${TAG:-$TAG}"
+RUN_ID="\${RUN_ID:-}"
+DOWNLOAD_DIR="\${DOWNLOAD_DIR:-"\$ROOT_DIR"}"
+ARTIFACT_NAME="vk-turn-proxy-\$TAG-ci-artifacts"
+
+if ! command -v gh >/dev/null 2>&1; then
+  echo "gh CLI is required to download CI artifacts." >&2
+  exit 64
+fi
+if ! gh auth status >/dev/null 2>&1; then
+  echo "gh CLI is not authenticated." >&2
+  exit 64
+fi
+
+cd "\$ROOT_DIR"
+tag_commit="\$(git rev-list -n 1 "\$TAG" 2>/dev/null || true)"
+if [[ -z "\$tag_commit" ]]; then
+  echo "Tag \$TAG is missing locally; fetch tags or pass RUN_ID explicitly." >&2
+  exit 64
+fi
+
+if [[ -z "\$RUN_ID" ]]; then
+  RUN_ID="\$(gh run list \\
+    --repo "\$REPO" \\
+    --workflow release-gates.yml \\
+    --limit 100 \\
+    --json databaseId,workflowName,status,conclusion,headSha \\
+    --jq ".[] | select(.workflowName == \\"Release Gates\\" and .headSha == \\"\$tag_commit\\" and .status == \\"completed\\" and .conclusion == \\"success\\") | .databaseId" \\
+    | head -1 || true)"
+fi
+
+if [[ -z "\$RUN_ID" ]]; then
+  echo "No successful Release Gates run found for \$TAG (\$tag_commit)." >&2
+  exit 1
+fi
+
+mkdir -p "\$DOWNLOAD_DIR"
+gh run download "\$RUN_ID" \\
+  --repo "\$REPO" \\
+  --name "\$ARTIFACT_NAME" \\
+  --dir "\$DOWNLOAD_DIR"
+
+manifest="\$DOWNLOAD_DIR/build/release/\$TAG-cross-platform-sha256.txt"
+if [[ ! -f "\$manifest" ]]; then
+  echo "Downloaded artifact is missing checksum manifest: \$manifest" >&2
+  exit 1
+fi
+
+(cd "\$DOWNLOAD_DIR" && shasum -a 256 -c "build/release/\$TAG-cross-platform-sha256.txt")
+
+cat <<EOF
+CI artifacts downloaded and verified.
+RUN_ID=\$RUN_ID
+DOWNLOAD_DIR=\$DOWNLOAD_DIR
+ANDROID_APK=\$DOWNLOAD_DIR/androidApp/build/outputs/apk/release/androidApp-release.apk
+ANDROID_AAB=\$DOWNLOAD_DIR/androidApp/build/outputs/bundle/release/androidApp-release.aab
+WINDOWS_RUNTIME_ZIP=\$DOWNLOAD_DIR/build/windows-package/vk-turn-proxy-windows-runtime.zip
+SERVER_PACKAGE=\$DOWNLOAD_DIR/build/server/vk-turn-proxy-server-\$TAG-linux-amd64.tar.gz
+EXTERNAL_SMOKE_KIT=\$DOWNLOAD_DIR/build/external-smoke-kit/\$TAG
+EOF
+SH
+chmod +x "$OUT_DIR/commands/download-ci-artifacts.sh"
 
 cat > "$OUT_DIR/commands/android-physical-smoke.sh" <<'SH'
 #!/usr/bin/env bash
@@ -422,6 +497,7 @@ tag=$TAG
 created_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 kit_dir=$OUT_DIR
 manifest=$OUT_DIR/cross-platform-sha256.txt
+download_ci_artifacts_command=$OUT_DIR/commands/download-ci-artifacts.sh
 android_command=$OUT_DIR/commands/android-physical-smoke.sh
 apple_secrets_command=$OUT_DIR/commands/apple-testflight-secrets.sh
 iphone_command=$OUT_DIR/commands/collect-iphone-testflight-evidence.sh

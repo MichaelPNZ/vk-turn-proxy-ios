@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TAG="${TAG:-v1.0-build158}"
+TAG="${TAG:-v1.0-build159}"
 OUT_DIR="$(mktemp -d "$ROOT_DIR/build/test-external-smoke-kit-$TAG.XXXXXX")"
 MANIFEST="$ROOT_DIR/build/release/$TAG-cross-platform-sha256.txt"
 created_manifest=0
@@ -28,6 +28,7 @@ required=(
   README.md
   summary.txt
   cross-platform-sha256.txt
+  commands/download-ci-artifacts.sh
   commands/apple-testflight-secrets.sh
   commands/android-physical-smoke.sh
   commands/collect-iphone-testflight-evidence.sh
@@ -47,6 +48,7 @@ for file in "${required[@]}"; do
 done
 
 bash -n \
+  "$OUT_DIR/commands/download-ci-artifacts.sh" \
   "$OUT_DIR/commands/apple-testflight-secrets.sh" \
   "$OUT_DIR/commands/android-physical-smoke.sh" \
   "$OUT_DIR/commands/collect-iphone-testflight-evidence.sh" \
@@ -55,11 +57,15 @@ bash -n \
   "$OUT_DIR/templates/server-production-final.sh"
 
 grep -q '^result=prepared$' "$OUT_DIR/summary.txt"
+grep -q 'commands/download-ci-artifacts.sh' "$OUT_DIR/README.md"
 grep -q 'commands/final-readiness-check.sh' "$OUT_DIR/README.md"
 grep -q '^export ANDROID_PHYSICAL_SMOKE_EVIDENCE=' "$OUT_DIR/templates/final-readiness.env.example"
 grep -q '^export SERVER_PRODUCTION_SMOKE_EVIDENCE=' "$OUT_DIR/templates/final-readiness.env.example"
 grep -q '^final_readiness_command=' "$OUT_DIR/summary.txt"
+grep -q '^download_ci_artifacts_command=' "$OUT_DIR/summary.txt"
 grep -q '^apple_secrets_command=' "$OUT_DIR/summary.txt"
+grep -q 'gh run download "$RUN_ID"' "$OUT_DIR/commands/download-ci-artifacts.sh"
+grep -q 'shasum -a 256 -c "build/release/$TAG-cross-platform-sha256.txt"' "$OUT_DIR/commands/download-ci-artifacts.sh"
 grep -q 'DRY_RUN="${DRY_RUN:-1}"' "$OUT_DIR/commands/apple-testflight-secrets.sh"
 grep -q 'CONFIRM_WRITE_GITHUB_SECRETS' "$OUT_DIR/commands/apple-testflight-secrets.sh"
 grep -q -- '--profiles-from-dir "$PROFILE_DIR"' "$OUT_DIR/commands/apple-testflight-secrets.sh"

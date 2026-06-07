@@ -22,7 +22,7 @@ android {
         applicationId = "com.vkturnproxy.android"
         minSdk = 26
         targetSdk = 36
-        versionCode = 158
+        versionCode = 159
         versionName = "1.0"
     }
 
