@@ -51,6 +51,7 @@ func TestControlServerStartStatusStop(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("runner did not stop")
 	}
+	waitControlServerDone(t, server)
 }
 
 func TestControlServerRejectsSecondStart(t *testing.T) {
@@ -70,6 +71,7 @@ func TestControlServerRejectsSecondStart(t *testing.T) {
 		t.Fatalf("second start unexpectedly succeeded: %#v", second)
 	}
 	_ = server.HandleCommand(ControlCommand{Command: ControlStop})
+	waitControlServerDone(t, server)
 }
 
 func TestControlServerExportsStatusAndLogTail(t *testing.T) {
@@ -118,4 +120,21 @@ func TestTailFileWithTruncation(t *testing.T) {
 
 func ptr[T any](value T) *T {
 	return &value
+}
+
+func waitControlServerDone(t *testing.T, server *ControlServer) {
+	t.Helper()
+
+	server.mu.Lock()
+	done := server.done
+	server.mu.Unlock()
+	if done == nil {
+		return
+	}
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("control server did not finish")
+	}
 }
