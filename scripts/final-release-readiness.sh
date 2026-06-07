@@ -536,6 +536,7 @@ check_shell_syntax \
   scripts/test-android-profile-peer-override.sh \
   scripts/test-android-physical-evidence-contract.sh \
   scripts/test-windows-runtime-evidence-contract.sh \
+  scripts/test-windows-runtime-package-ci-smoke-contract.sh \
   scripts/test-windows-installer-evidence-contract.sh \
   scripts/test-apple-signing-evidence-contract.sh \
   scripts/test-github-testflight-secrets-config-contract.sh \
@@ -562,6 +563,7 @@ run_required "server public smoke evidence contract test" scripts/test-server-pu
 run_required "android profile peer override test" scripts/test-android-profile-peer-override.sh
 run_required "android physical evidence contract test" scripts/test-android-physical-evidence-contract.sh
 run_required "windows runtime evidence contract test" scripts/test-windows-runtime-evidence-contract.sh
+run_required "windows runtime package CI smoke contract test" scripts/test-windows-runtime-package-ci-smoke-contract.sh
 run_required "windows installer evidence contract test" scripts/test-windows-installer-evidence-contract.sh
 run_required "apple signing evidence contract test" scripts/test-apple-signing-evidence-contract.sh
 run_required "github testflight secrets config contract test" scripts/test-github-testflight-secrets-config-contract.sh

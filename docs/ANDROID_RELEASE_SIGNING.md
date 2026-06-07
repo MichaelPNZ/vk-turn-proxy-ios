@@ -94,9 +94,9 @@ Final readiness also requires the runtime evidence files written by the smoke:
 The external smoke kit also writes a physical-device wrapper:
 
 ```bash
-scripts/prepare-external-smoke-kit.sh v1.0-build163
+scripts/prepare-external-smoke-kit.sh v1.0-build164
 PROFILE_FILE=/absolute/path/to/full-backup-or-connection.json \
-  build/external-smoke-kit/v1.0-build163/commands/android-physical-smoke.sh
+  build/external-smoke-kit/v1.0-build164/commands/android-physical-smoke.sh
 ```
 
 The wrapper prints `ANDROID_PHYSICAL_SMOKE_EVIDENCE=<dir>` when the smoke

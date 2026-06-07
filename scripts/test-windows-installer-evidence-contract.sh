@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TAG="${TAG:-v1.0-build163}"
+TAG="${TAG:-v1.0-build164}"
 TMP_DIR="$(mktemp -d "$ROOT_DIR/build/test-windows-installer-evidence.XXXXXX")"
 INSTALLER_SHA256="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 

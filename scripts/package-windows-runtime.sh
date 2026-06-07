@@ -614,7 +614,18 @@ Write-Host "Windows runtime smoke passed. Evidence: $evidenceDir"
 PS1
 
 rm -f "$ZIP"
-(cd "$OUT_DIR" && zip -qr "$ZIP" "vk-turn-proxy-windows")
+if command -v zip >/dev/null 2>&1; then
+  (cd "$OUT_DIR" && zip -qr "$ZIP" "vk-turn-proxy-windows")
+elif command -v pwsh >/dev/null 2>&1; then
+  (cd "$OUT_DIR" && pwsh -NoProfile -NonInteractive -Command \
+    "Compress-Archive -Path 'vk-turn-proxy-windows' -DestinationPath 'vk-turn-proxy-windows-runtime.zip' -Force")
+elif command -v powershell.exe >/dev/null 2>&1; then
+  (cd "$OUT_DIR" && powershell.exe -NoProfile -NonInteractive -Command \
+    "Compress-Archive -Path 'vk-turn-proxy-windows' -DestinationPath 'vk-turn-proxy-windows-runtime.zip' -Force")
+else
+  echo "zip or PowerShell Compress-Archive is required to create $ZIP" >&2
+  exit 1
+fi
 
 sha256="$(shasum -a 256 "$ZIP" | awk '{print $1}')"
 printf 'package=%s\n' "$ZIP"
