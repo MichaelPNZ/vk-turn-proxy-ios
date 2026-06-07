@@ -62,6 +62,7 @@ check_shell_syntax \
   scripts/test-windows-runtime-evidence-contract.sh \
   scripts/test-windows-installer-evidence-contract.sh \
   scripts/test-apple-signing-evidence-contract.sh \
+  scripts/test-github-testflight-secrets-config-contract.sh \
   scripts/test-apple-smoke-evidence-contract.sh \
   scripts/test-server-production-evidence-contract.sh \
   scripts/test-external-smoke-kit.sh \
@@ -82,6 +83,7 @@ run scripts/test-android-physical-evidence-contract.sh
 run scripts/test-windows-runtime-evidence-contract.sh
 run scripts/test-windows-installer-evidence-contract.sh
 run scripts/test-apple-signing-evidence-contract.sh
+run scripts/test-github-testflight-secrets-config-contract.sh
 run scripts/test-apple-smoke-evidence-contract.sh
 run scripts/test-server-production-evidence-contract.sh
 run env TAG="$TAG" scripts/test-external-smoke-kit.sh

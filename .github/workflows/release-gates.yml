@@ -108,6 +108,7 @@ jobs:
           scripts/test-windows-runtime-evidence-contract.sh
           scripts/test-windows-installer-evidence-contract.sh
           scripts/test-apple-signing-evidence-contract.sh
+          scripts/test-github-testflight-secrets-config-contract.sh
           scripts/test-apple-smoke-evidence-contract.sh
           scripts/test-server-production-evidence-contract.sh
           TAG="$TAG" scripts/test-external-smoke-kit.sh

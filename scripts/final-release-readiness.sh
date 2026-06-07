@@ -508,6 +508,7 @@ check_shell_syntax \
   scripts/test-windows-runtime-evidence-contract.sh \
   scripts/test-windows-installer-evidence-contract.sh \
   scripts/test-apple-signing-evidence-contract.sh \
+  scripts/test-github-testflight-secrets-config-contract.sh \
   scripts/test-apple-smoke-evidence-contract.sh \
   scripts/test-server-production-evidence-contract.sh \
   scripts/test-external-smoke-kit.sh \
@@ -528,6 +529,7 @@ run_required "android physical evidence contract test" scripts/test-android-phys
 run_required "windows runtime evidence contract test" scripts/test-windows-runtime-evidence-contract.sh
 run_required "windows installer evidence contract test" scripts/test-windows-installer-evidence-contract.sh
 run_required "apple signing evidence contract test" scripts/test-apple-signing-evidence-contract.sh
+run_required "github testflight secrets config contract test" scripts/test-github-testflight-secrets-config-contract.sh
 run_required "apple smoke evidence contract test" scripts/test-apple-smoke-evidence-contract.sh
 run_required "server production evidence contract test" scripts/test-server-production-evidence-contract.sh
 run_required "external smoke kit test" scripts/test-external-smoke-kit.sh

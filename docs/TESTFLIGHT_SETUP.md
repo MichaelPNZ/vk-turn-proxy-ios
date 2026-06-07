@@ -137,6 +137,10 @@ scripts/configure-github-testflight-secrets.sh \
   --appstore-key-p8 /absolute/path/AuthKey_ABCDE12345.p8
 ```
 
+The script validates the `.p8`, `.p12` password, provisioning profile decode,
+bundle-id coverage, and App Store distribution profile type before writing any
+GitHub secrets.
+
 The helper validates inputs, creates temporary base64 payload files, writes the
 six GitHub secrets with `gh secret set`, and removes the temporary payloads. It
 does not print secret values. Use `DRY_RUN=1` to validate inputs and print only

@@ -2,6 +2,8 @@
 set -euo pipefail
 
 REPO="${REPO:-MichaelPNZ/vk-turn-proxy-ios}"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROJECT_YML="$ROOT_DIR/VKTurnProxy/project.yml"
 CERT_P12=""
 CERT_PASSWORD=""
 PROFILES=()
@@ -77,6 +79,108 @@ encode_file() {
   base64 "$input" > "$output"
 }
 
+bundle_ids() {
+  awk '/PRODUCT_BUNDLE_IDENTIFIER:/ {print $NF}' "$PROJECT_YML" 2>/dev/null | sort -u
+}
+
+plist_value() {
+  local plist="$1"
+  local key="$2"
+  /usr/libexec/PlistBuddy -c "Print :$key" "$plist" 2>/dev/null || true
+}
+
+profile_app_id() {
+  plist_value "$1" "Entitlements:application-identifier"
+}
+
+profile_get_task_allow() {
+  plist_value "$1" "Entitlements:get-task-allow"
+}
+
+profile_matches_bundle() {
+  local plist="$1"
+  local bundle_id="$2"
+  local app_id
+  app_id="$(profile_app_id "$plist")"
+  [[ "$app_id" == "$TEAM_ID.$bundle_id" || "$app_id" == "$TEAM_ID.*" || "$app_id" == *".$bundle_id" ]]
+}
+
+validate_appstore_key() {
+  if ! grep -q -- '-----BEGIN PRIVATE KEY-----' "$APPSTORE_KEY_P8"; then
+    fail "App Store Connect .p8 does not look like a private key: $APPSTORE_KEY_P8"
+  fi
+  if [[ "$(basename "$APPSTORE_KEY_P8")" != "AuthKey_$APPSTORE_KEY_ID.p8" ]]; then
+    echo "WARN: .p8 basename does not match APPSTORE_KEY_ID: expected AuthKey_$APPSTORE_KEY_ID.p8" >&2
+  fi
+}
+
+validate_p12() {
+  command -v openssl >/dev/null 2>&1 || fail "openssl is required to validate the Apple Distribution .p12"
+  local pass_file="$tmp_dir/cert-password.txt"
+  local cert_info="$tmp_dir/cert-info.txt"
+  local cert_err="$tmp_dir/cert-error.txt"
+  printf '%s' "$CERT_PASSWORD" > "$pass_file"
+  chmod 600 "$pass_file"
+  if ! openssl pkcs12 -in "$CERT_P12" -passin "file:$pass_file" -nokeys -clcerts -nodes > "$cert_info" 2> "$cert_err"; then
+    fail "Apple Distribution .p12 could not be opened with the supplied password"
+  fi
+  if ! grep -q 'Apple Distribution' "$cert_info"; then
+    fail "Apple Distribution .p12 does not contain an Apple Distribution certificate"
+  fi
+}
+
+validate_profiles() {
+  command -v security >/dev/null 2>&1 || fail "security is required to validate provisioning profiles"
+  [[ -x /usr/libexec/PlistBuddy ]] || fail "PlistBuddy is required to validate provisioning profiles"
+  [[ -f "$PROJECT_YML" ]] || fail "project.yml is missing: $PROJECT_YML"
+
+  TEAM_ID="$(awk '/DEVELOPMENT_TEAM:/ {print $NF; exit}' "$PROJECT_YML" 2>/dev/null || true)"
+  [[ -n "$TEAM_ID" ]] || fail "DEVELOPMENT_TEAM is missing in $PROJECT_YML"
+
+  local basenames="$tmp_dir/profile-basenames.txt"
+  : > "$basenames"
+  local profile
+  for profile in "${PROFILES[@]}"; do
+    basename "$profile" >> "$basenames"
+  done
+  if [[ "$(sort "$basenames" | uniq -d | wc -l | tr -d ' ')" != "0" ]]; then
+    fail "provisioning profile basenames must be unique because profiles are zipped with -j"
+  fi
+
+  local decoded_dir="$tmp_dir/decoded-profiles"
+  mkdir -p "$decoded_dir"
+  for profile in "${PROFILES[@]}"; do
+    local decoded="$decoded_dir/$(basename "$profile").plist"
+    if ! security cms -D -i "$profile" > "$decoded" 2>/dev/null; then
+      fail "provisioning profile could not be decoded: $profile"
+    fi
+  done
+
+  local bundle_id matched distribution_match decoded get_task_allow
+  while IFS= read -r bundle_id; do
+    [[ -n "$bundle_id" ]] || continue
+    matched=0
+    distribution_match=0
+    for decoded in "$decoded_dir"/*.plist; do
+      [[ -f "$decoded" ]] || continue
+      if ! profile_matches_bundle "$decoded" "$bundle_id"; then
+        continue
+      fi
+      matched=1
+      get_task_allow="$(profile_get_task_allow "$decoded")"
+      if [[ "$get_task_allow" == "false" ]]; then
+        distribution_match=1
+      fi
+    done
+    if [[ "$matched" != 1 ]]; then
+      fail "no provisioning profile matches bundle id $bundle_id"
+    fi
+    if [[ "$distribution_match" != 1 ]]; then
+      fail "no App Store distribution provisioning profile found for $bundle_id"
+    fi
+  done < <(bundle_ids)
+}
+
 set_secret_file() {
   local name="$1"
   local file="$2"
@@ -111,6 +215,9 @@ require_file "$APPSTORE_KEY_P8" "App Store Connect .p8"
 [[ "$APPSTORE_ISSUER_ID" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]] || fail "--appstore-issuer-id must be a UUID"
 [[ "${#PROFILES[@]}" -ge 4 ]] || fail "at least four --profile files are required"
 
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "$tmp_dir"' EXIT
+
 for profile in "${PROFILES[@]}"; do
   require_file "$profile" "provisioning profile"
   case "$profile" in
@@ -119,8 +226,9 @@ for profile in "${PROFILES[@]}"; do
   esac
 done
 
-tmp_dir="$(mktemp -d)"
-trap 'rm -rf "$tmp_dir"' EXIT
+validate_appstore_key
+validate_p12
+validate_profiles
 
 cert_b64="$tmp_dir/apple-distribution.p12.base64"
 profiles_zip="$tmp_dir/provisioning-profiles.zip"
