@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TAG="${TAG:-v1.0-build162}"
+TAG="${TAG:-v1.0-build163}"
 OUT_DIR="$(mktemp -d "$ROOT_DIR/build/test-external-smoke-kit-$TAG.XXXXXX")"
 MANIFEST="$ROOT_DIR/build/release/$TAG-cross-platform-sha256.txt"
 created_manifest=0
@@ -71,6 +71,9 @@ grep -q 'CONFIRM_WRITE_GITHUB_SECRETS' "$OUT_DIR/commands/apple-testflight-secre
 grep -q -- '--profiles-from-dir "$PROFILE_DIR"' "$OUT_DIR/commands/apple-testflight-secrets.sh"
 grep -q -- '--appstore-env "$APPSTORE_ENV"' "$OUT_DIR/commands/apple-testflight-secrets.sh"
 grep -q 'REQUIRE_PHYSICAL_DEVICE=1' "$OUT_DIR/commands/android-physical-smoke.sh"
+grep -q 'USE_PUBLIC_SERVER="${USE_PUBLIC_SERVER:-1}"' "$OUT_DIR/commands/android-physical-smoke.sh"
+grep -q 'scripts/smoke-android-release-with-public-server.sh' "$OUT_DIR/commands/android-physical-smoke.sh"
+grep -q 'USE_PUBLIC_SERVER" == "1"' "$OUT_DIR/commands/android-physical-smoke.sh"
 grep -q 'Missing concrete value for $name' "$OUT_DIR/commands/final-readiness-check.sh"
 grep -q 'Evidence directory does not exist for $name' "$OUT_DIR/commands/final-readiness-check.sh"
 grep -q 'scripts/final-release-readiness.sh "$TAG"' "$OUT_DIR/commands/final-readiness-check.sh"

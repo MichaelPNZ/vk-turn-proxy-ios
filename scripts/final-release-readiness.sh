@@ -533,6 +533,7 @@ check_shell_syntax \
   scripts/test-server-deploy-safety.sh \
   scripts/test-server-public-smoke-evidence-contract.sh \
   scripts/test-release-tag-alignment.sh \
+  scripts/test-android-profile-peer-override.sh \
   scripts/test-android-physical-evidence-contract.sh \
   scripts/test-windows-runtime-evidence-contract.sh \
   scripts/test-windows-installer-evidence-contract.sh \
@@ -558,6 +559,7 @@ run_required "release manifest format test" scripts/test-release-manifest-format
 run_required "release tag alignment test" scripts/test-release-tag-alignment.sh
 run_required "server deploy safety test" scripts/test-server-deploy-safety.sh
 run_required "server public smoke evidence contract test" scripts/test-server-public-smoke-evidence-contract.sh
+run_required "android profile peer override test" scripts/test-android-profile-peer-override.sh
 run_required "android physical evidence contract test" scripts/test-android-physical-evidence-contract.sh
 run_required "windows runtime evidence contract test" scripts/test-windows-runtime-evidence-contract.sh
 run_required "windows installer evidence contract test" scripts/test-windows-installer-evidence-contract.sh

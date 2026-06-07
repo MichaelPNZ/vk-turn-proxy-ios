@@ -9,7 +9,7 @@ on:
       tag:
         description: "Release tag to upload"
         required: true
-        default: "v1.0-build162"
+        default: "v1.0-build163"
       target:
         description: "Apple targets to upload"
         required: true
@@ -55,19 +55,74 @@ jobs:
           echo "target=$target" >> "$GITHUB_OUTPUT"
           echo "Using TAG=$tag TARGET_SET=$target"
 
+      - name: Check Apple signing secrets
+        id: apple_secrets
+        shell: bash
+        env:
+          APPLE_DISTRIBUTION_CERT_P12_BASE64: ${{ secrets.APPLE_DISTRIBUTION_CERT_P12_BASE64 }}
+          APPLE_DISTRIBUTION_CERT_PASSWORD: ${{ secrets.APPLE_DISTRIBUTION_CERT_PASSWORD }}
+          APPLE_PROVISIONING_PROFILES_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILES_BASE64 }}
+          APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+          APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+          APPSTORE_CONNECT_API_KEY_P8_BASE64: ${{ secrets.APPSTORE_CONNECT_API_KEY_P8_BASE64 }}
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in \
+            APPLE_DISTRIBUTION_CERT_P12_BASE64 \
+            APPLE_DISTRIBUTION_CERT_PASSWORD \
+            APPLE_PROVISIONING_PROFILES_BASE64 \
+            APPSTORE_KEY_ID \
+            APPSTORE_ISSUER_ID \
+            APPSTORE_CONNECT_API_KEY_P8_BASE64; do
+            if [[ -z "${!name:-}" ]]; then
+              missing+=("$name")
+            fi
+          done
+          if [[ "${#missing[@]}" -eq 0 ]]; then
+            echo "ready=1" >> "$GITHUB_OUTPUT"
+            echo "Apple signing secrets are present."
+          else
+            printf -v joined '%s,' "${missing[@]}"
+            joined="${joined%,}"
+            echo "ready=0" >> "$GITHUB_OUTPUT"
+            echo "missing=$joined" >> "$GITHUB_OUTPUT"
+            echo "Apple signing secrets are missing: $joined"
+          fi
+
+      - name: Skip automatic TestFlight upload without Apple secrets
+        if: steps.apple_secrets.outputs.ready != '1' && github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Skipping automatic TestFlight upload for $TAG because Apple signing secrets are missing."
+          echo "Missing: ${{ steps.apple_secrets.outputs.missing }}"
+
+      - name: Fail manual TestFlight upload without Apple secrets
+        if: steps.apple_secrets.outputs.ready != '1' && github.event_name != 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Manual TestFlight upload requires Apple signing secrets."
+          echo "Missing: ${{ steps.apple_secrets.outputs.missing }}"
+          exit 64
+
       - name: Checkout tag
+        if: steps.apple_secrets.outputs.ready == '1'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ steps.select.outputs.tag }}
 
       - name: Set up Java 17
+        if: steps.apple_secrets.outputs.ready == '1'
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Set up Go
+        if: steps.apple_secrets.outputs.ready == '1'
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -76,9 +131,11 @@ jobs:
             WireGuardBridge/go.sum
 
       - name: Set up Android SDK
+        if: steps.apple_secrets.outputs.ready == '1'
         uses: android-actions/setup-android@v3
 
       - name: Install build tooling
+        if: steps.apple_secrets.outputs.ready == '1'
         shell: bash
         run: |
           set -euo pipefail
@@ -87,6 +144,7 @@ jobs:
           sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
       - name: Create ephemeral CI Android signing key
+        if: steps.apple_secrets.outputs.ready == '1'
         shell: bash
         run: |
           set -euo pipefail
@@ -107,6 +165,7 @@ jobs:
           } > androidApp/signing.properties
 
       - name: Install Apple signing assets
+        if: steps.apple_secrets.outputs.ready == '1'
         shell: bash
         env:
           APPLE_DISTRIBUTION_CERT_P12_BASE64: ${{ secrets.APPLE_DISTRIBUTION_CERT_P12_BASE64 }}
@@ -118,9 +177,11 @@ jobs:
         run: scripts/install-apple-signing-assets.sh
 
       - name: Preflight TestFlight signing
+        if: steps.apple_secrets.outputs.ready == '1'
         shell: bash
         run: scripts/preflight-testflight.sh "$TAG"
 
       - name: Upload to TestFlight and GitHub Release
+        if: steps.apple_secrets.outputs.ready == '1'
         shell: bash
         run: ./release.sh "$TAG" "$TARGET_SET"

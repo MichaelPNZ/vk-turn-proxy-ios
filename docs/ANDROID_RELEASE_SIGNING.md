@@ -73,9 +73,12 @@ SERIAL=<adb-device-id> \
 ```
 
 When using `PROFILE_FILE` or `IMPORT_LINK`, make sure that payload points at the
-temporary server, for example `142.252.220.91:56014`. The orchestrator prints
-`ANDROID_PHYSICAL_SMOKE_EVIDENCE=<dir>/android`; use that nested Android
-evidence directory for final readiness.
+temporary server, for example `142.252.220.91:56014`. The smoke scripts rewrite
+`peerAddress` in JSON profile files and `vkturnproxy://import?data=...` links
+when `PEER_ADDRESS` is set; the public-server orchestrator sets it to the
+temporary VPS public port automatically. The orchestrator prints
+`ANDROID_PHYSICAL_SMOKE_EVIDENCE=<dir>/android`; use that nested Android evidence
+directory for final readiness.
 
 The smoke prints `evidence_dir=...` on success. Use that directory as
 `ANDROID_PHYSICAL_SMOKE_EVIDENCE` for `scripts/final-release-readiness.sh`.
@@ -91,13 +94,15 @@ Final readiness also requires the runtime evidence files written by the smoke:
 The external smoke kit also writes a physical-device wrapper:
 
 ```bash
-scripts/prepare-external-smoke-kit.sh v1.0-build162
+scripts/prepare-external-smoke-kit.sh v1.0-build163
 PROFILE_FILE=/absolute/path/to/full-backup-or-connection.json \
-  build/external-smoke-kit/v1.0-build162/commands/android-physical-smoke.sh
+  build/external-smoke-kit/v1.0-build163/commands/android-physical-smoke.sh
 ```
 
 The wrapper prints `ANDROID_PHYSICAL_SMOKE_EVIDENCE=<dir>` when the smoke
-passes.
+passes. By default it uses the temporary public VPS server; set
+`USE_PUBLIC_SERVER=0` only when intentionally testing an already-promoted
+production endpoint.
 
 Supported profile inputs:
 

@@ -83,9 +83,14 @@ server and client evidence, then stops the temporary server:
 ANDROID_HOME=/Users/mihailpozalov/Library/Android/sdk \
   SERIAL=emulator-5554 \
   BUILD_RELEASE=0 \
+  PROFILE_FILE=/absolute/path/to/full-backup-or-connection.json \
   scripts/smoke-android-release-with-public-server.sh \
   build/evidence/android-release-public-server-$(date +%Y%m%d-%H%M%S)
 ```
+
+The orchestrator sets `PEER_ADDRESS` to `142.252.220.91:56014` by default and
+the Android smoke script rewrites `peerAddress` in JSON profile files and
+`vkturnproxy://import?data=...` links before importing.
 
 Use the public smoke helper only for server-only evidence:
 

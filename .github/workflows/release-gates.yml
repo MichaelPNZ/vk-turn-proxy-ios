@@ -35,7 +35,7 @@ jobs:
           if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "${GITHUB_REF_NAME:-}" =~ build[0-9]+$ ]]; then
             tag="$GITHUB_REF_NAME"
           else
-            tag="v1.0-build162"
+            tag="v1.0-build163"
           fi
           echo "TAG=$tag" >> "$GITHUB_ENV"
           echo "Using TAG=$tag"

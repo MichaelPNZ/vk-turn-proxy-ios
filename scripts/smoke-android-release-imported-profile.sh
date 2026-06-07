@@ -15,6 +15,7 @@ ALLOWED_IPS="${ALLOWED_IPS:-0.0.0.0/0}"
 NUM_CONNECTIONS="${NUM_CONNECTIONS:-10}"
 BUILD_RELEASE="${BUILD_RELEASE:-1}"
 PREPARE_IMPORT_ONLY="${PREPARE_IMPORT_ONLY:-0}"
+UNSAFE_WRITE_IMPORT_LINK="${UNSAFE_WRITE_IMPORT_LINK:-0}"
 EVIDENCE_DIR="${EVIDENCE_DIR:-}"
 REQUIRE_PHYSICAL_DEVICE="${REQUIRE_PHYSICAL_DEVICE:-0}"
 source_label=""
@@ -208,6 +209,71 @@ build_link_from_raw_payload() {
   printf 'vkturnproxy://import?data=%s\n' "$payload"
 }
 
+rewrite_raw_payload_peer_address() {
+  local raw="$1"
+  if [[ -z "$PEER_ADDRESS" ]]; then
+    printf '%s' "$raw"
+    return 0
+  fi
+  PEER_ADDRESS_OVERRIDE="$PEER_ADDRESS" python3 -c '
+import json
+import os
+import sys
+
+raw = sys.stdin.read()
+data = json.loads(raw)
+if not isinstance(data, dict):
+    raise SystemExit("profile JSON must be an object")
+settings = data.setdefault("settings", {})
+if not isinstance(settings, dict):
+    raise SystemExit("profile JSON settings must be an object")
+settings["peerAddress"] = os.environ["PEER_ADDRESS_OVERRIDE"]
+sys.stdout.write(json.dumps(data, separators=(",", ":")))
+' <<< "$raw"
+}
+
+rewrite_import_link_peer_address() {
+  local import_link="$1"
+  if [[ -z "$PEER_ADDRESS" ]]; then
+    printf '%s\n' "$import_link"
+    return 0
+  fi
+  PEER_ADDRESS_OVERRIDE="$PEER_ADDRESS" IMPORT_LINK_VALUE="$import_link" python3 -c '
+import base64
+import json
+import os
+import urllib.parse
+
+link = os.environ["IMPORT_LINK_VALUE"]
+peer = os.environ["PEER_ADDRESS_OVERRIDE"]
+parsed = urllib.parse.urlparse(link)
+params = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+updated = []
+rewritten = False
+for key, value in params:
+    if key == "data" and not rewritten:
+        padding = "=" * ((4 - len(value) % 4) % 4)
+        raw = base64.urlsafe_b64decode((value + padding).encode()).decode()
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            raise SystemExit("import payload JSON must be an object")
+        settings = data.setdefault("settings", {})
+        if not isinstance(settings, dict):
+            raise SystemExit("import payload settings must be an object")
+        settings["peerAddress"] = peer
+        encoded_raw = json.dumps(data, separators=(",", ":")).encode()
+        encoded = base64.urlsafe_b64encode(encoded_raw).decode().rstrip("=")
+        updated.append((key, encoded))
+        rewritten = True
+    else:
+        updated.append((key, value))
+if not rewritten:
+    raise SystemExit("import link is missing data query parameter")
+query = urllib.parse.urlencode(updated)
+print(urllib.parse.urlunparse(parsed._replace(query=query)))
+'
+}
+
 build_link_from_profile_file() {
   test -f "$PROFILE_FILE" || {
     echo "PROFILE_FILE does not exist: $PROFILE_FILE" >&2
@@ -216,8 +282,9 @@ build_link_from_profile_file() {
   local raw
   raw="$(cat "$PROFILE_FILE")"
   if [[ "$raw" == vkturnproxy://import* ]]; then
-    printf '%s\n' "$raw"
+    rewrite_import_link_peer_address "$raw"
   else
+    raw="$(rewrite_raw_payload_peer_address "$raw")"
     build_link_from_raw_payload "$raw"
   fi
 }
@@ -278,7 +345,7 @@ build_import_link() {
       echo "IMPORT_LINK must start with vkturnproxy://import" >&2
       exit 64
     fi
-    printf '%s\n' "$IMPORT_LINK"
+    rewrite_import_link_peer_address "$IMPORT_LINK"
   elif [[ -n "$PROFILE_FILE" ]]; then
     build_link_from_profile_file
   else
@@ -301,6 +368,10 @@ fi
 
 if [[ "$PREPARE_IMPORT_ONLY" == "1" ]]; then
   write_summary "prepared" "import link prepared without device install/start"
+  if [[ "$UNSAFE_WRITE_IMPORT_LINK" == "1" ]]; then
+    ensure_evidence_dir
+    printf '%s\n' "$link" > "$EVIDENCE_DIR/import-link.txt"
+  fi
   printf 'Android release imported-profile smoke prepared import link.\n'
   printf 'source=%s\n' "$source_label"
   printf 'link_bytes=%d\n' "${#link}"
