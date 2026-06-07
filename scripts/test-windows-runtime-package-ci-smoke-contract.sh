@@ -23,9 +23,20 @@ fi
 
 grep -q 'windows-runtime-package-smoke:' "$WORKFLOW"
 grep -q 'runs-on: windows-latest' "$WORKFLOW"
-grep -q 'scripts/package-windows-runtime.sh' "$WORKFLOW"
-grep -q 'scripts/smoke-windows-runtime-package-ci.ps1' "$WORKFLOW"
 grep -q 'vk-turn-proxy-windows-package-smoke-' "$WORKFLOW"
+
+windows_job="$(
+  awk '
+    /^  windows-runtime-package-smoke:/ { in_job = 1 }
+    in_job && /^  [a-zA-Z0-9_-]+:/ && !/^  windows-runtime-package-smoke:/ { exit }
+    in_job { print }
+  ' "$WORKFLOW"
+)"
+grep -q 'runs-on: windows-latest' <<<"$windows_job"
+grep -q 'cygpath -u "\$ANDROID_HOME"' <<<"$windows_job"
+grep -q 'sdkmanager_bin=' <<<"$windows_job"
+grep -q 'scripts/package-windows-runtime.sh' <<<"$windows_job"
+grep -q 'scripts/smoke-windows-runtime-package-ci.ps1' <<<"$windows_job"
 
 if command -v pwsh >/dev/null 2>&1; then
   pwsh -NoProfile -NonInteractive -Command "\$null = [scriptblock]::Create((Get-Content -Raw '$SCRIPT'))"

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TAG="${1:-v1.0-build164}"
+TAG="${1:-v1.0-build165}"
 ANDROID_HOME="${ANDROID_HOME:-"$HOME/Library/Android/sdk"}"
 HOST="${HOST:-142.252.220.91}"
 SSH_USER="${SSH_USER:-root}"

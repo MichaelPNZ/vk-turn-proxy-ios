@@ -35,7 +35,7 @@ jobs:
           if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "${GITHUB_REF_NAME:-}" =~ build[0-9]+$ ]]; then
             tag="$GITHUB_REF_NAME"
           else
-            tag="v1.0-build164"
+            tag="v1.0-build165"
           fi
           echo "TAG=$tag" >> "$GITHUB_ENV"
           echo "Using TAG=$tag"
@@ -196,8 +196,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+          android_home_unix="$(cygpath -u "$ANDROID_HOME" 2>/dev/null || printf '%s' "$ANDROID_HOME")"
+          sdkmanager_bin="$(find "$android_home_unix/cmdline-tools" -path '*/bin/sdkmanager*' -type f | sort | tail -1)"
+          if [[ -z "$sdkmanager_bin" ]]; then
+            echo "sdkmanager not found under $ANDROID_HOME" >&2
+            exit 1
+          fi
+          yes | "$sdkmanager_bin" --licenses >/dev/null || true
+          "$sdkmanager_bin" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
       - name: Build Windows runtime package
         shell: bash

@@ -47,7 +47,7 @@ archive/upload path.
 Check current project-side readiness:
 
 ```bash
-scripts/preflight-testflight.sh v1.0-build164
+scripts/preflight-testflight.sh v1.0-build165
 ```
 
 Inspect local signing state without modifying keychain or profiles:
@@ -91,7 +91,7 @@ If only external setup remains and you want a local gate without failing on
 missing credentials:
 
 ```bash
-ALLOW_EXTERNAL_BLOCKERS=1 scripts/preflight-testflight.sh v1.0-build164
+ALLOW_EXTERNAL_BLOCKERS=1 scripts/preflight-testflight.sh v1.0-build165
 ```
 
 ## Release
@@ -100,7 +100,7 @@ After the working tree is committed or stashed, the tag exists locally, App
 Store Connect env is configured, and Apple Distribution signing is valid:
 
 ```bash
-./release.sh v1.0-build164 all
+./release.sh v1.0-build165 all
 ```
 
 `all` uploads iOS and macOS to TestFlight and attaches Android, Windows, server,
@@ -192,7 +192,7 @@ base64 -i /absolute/path/AuthKey_<APPSTORE_KEY_ID>.p8 | pbcopy
 Run the workflow from GitHub Actions:
 
 - workflow: `TestFlight Release`
-- tag: `v1.0-build164`
+- tag: `v1.0-build165`
 - target: `all`, `ios`, or `macos`
 
 Tag pushes matching `v*build*` also trigger the workflow. The workflow installs
