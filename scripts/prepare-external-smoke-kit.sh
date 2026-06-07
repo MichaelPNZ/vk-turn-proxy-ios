@@ -70,8 +70,9 @@ CERT_PASSWORD='<p12 password>' \\
 Final readiness command template:
 
 \`\`\`bash
-source "$OUT_DIR/templates/final-readiness.env.example"
-scripts/final-release-readiness.sh "$TAG"
+cp "$OUT_DIR/templates/final-readiness.env.example" "$OUT_DIR/final-readiness.env"
+# edit $OUT_DIR/final-readiness.env
+"$OUT_DIR/commands/final-readiness-check.sh" "$OUT_DIR/final-readiness.env"
 \`\`\`
 
 Current cross-platform artifacts:
@@ -226,6 +227,73 @@ printf 'MACOS_TESTFLIGHT_SMOKE_EVIDENCE=%s\n' "$EVIDENCE_DIR"
 SH
 chmod +x "$OUT_DIR/commands/collect-macos-testflight-evidence.sh"
 
+cat > "$OUT_DIR/commands/final-readiness-check.sh" <<SH
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")/../../../.." && pwd)"
+TAG="\${TAG:-$TAG}"
+ENV_FILE="\${1:-"\$(cd "\$(dirname "\${BASH_SOURCE[0]}")/.." && pwd)/final-readiness.env"}"
+
+usage() {
+  cat >&2 <<'EOF'
+Usage:
+  commands/final-readiness-check.sh [final-readiness.env]
+
+Copy templates/final-readiness.env.example to final-readiness.env, fill every
+evidence path after the external smoke runs, then run this command from the
+repository checkout.
+EOF
+}
+
+if [[ "\${1:-}" == "-h" || "\${1:-}" == "--help" || "\${1:-}" == "help" ]]; then
+  usage
+  exit 64
+fi
+
+if [[ ! -f "\$ENV_FILE" ]]; then
+  echo "Final readiness env file not found: \$ENV_FILE" >&2
+  usage
+  exit 64
+fi
+
+set -a
+# shellcheck disable=SC1090
+source "\$ENV_FILE"
+set +a
+
+required_env=(
+  ANDROID_PHYSICAL_SMOKE_EVIDENCE
+  IPHONE_TESTFLIGHT_SMOKE_EVIDENCE
+  MACOS_TESTFLIGHT_SMOKE_EVIDENCE
+  WINDOWS_RUNTIME_SMOKE_EVIDENCE
+  WINDOWS_INSTALLER_SMOKE_EVIDENCE
+  SERVER_PRODUCTION_SMOKE_EVIDENCE
+)
+
+missing=0
+for name in "\${required_env[@]}"; do
+  value="\${!name:-}"
+  if [[ -z "\$value" || "\$value" == /absolute/path/* || "\$value" == *"..."* ]]; then
+    echo "Missing concrete value for \$name in \$ENV_FILE" >&2
+    missing=1
+    continue
+  fi
+  if [[ ! -d "\$value" ]]; then
+    echo "Evidence directory does not exist for \$name: \$value" >&2
+    missing=1
+  fi
+done
+
+if [[ "\$missing" == "1" ]]; then
+  exit 64
+fi
+
+cd "\$ROOT_DIR"
+scripts/final-release-readiness.sh "\$TAG"
+SH
+chmod +x "$OUT_DIR/commands/final-readiness-check.sh"
+
 cat > "$OUT_DIR/templates/windows-runtime-smoke.ps1" <<'PS1'
 # Run on Windows as Administrator after unpacking vk-turn-proxy-windows-runtime.zip.
 # Generate config\start-request.json from the desktop app first.
@@ -336,8 +404,9 @@ chmod +x "$OUT_DIR/templates/server-production-final.sh"
 
 cat > "$OUT_DIR/templates/final-readiness.env.example" <<EOF
 # Fill these after each external smoke passes, then run:
-#   source "$OUT_DIR/templates/final-readiness.env.example"
-#   scripts/final-release-readiness.sh "$TAG"
+#   cp "$OUT_DIR/templates/final-readiness.env.example" "$OUT_DIR/final-readiness.env"
+#   # edit "$OUT_DIR/final-readiness.env"
+#   "$OUT_DIR/commands/final-readiness-check.sh" "$OUT_DIR/final-readiness.env"
 
 export ANDROID_PHYSICAL_SMOKE_EVIDENCE=/absolute/path/to/build/evidence/android-physical-...
 export IPHONE_TESTFLIGHT_SMOKE_EVIDENCE=/absolute/path/to/build/evidence/iphone-testflight-...
@@ -357,6 +426,7 @@ android_command=$OUT_DIR/commands/android-physical-smoke.sh
 apple_secrets_command=$OUT_DIR/commands/apple-testflight-secrets.sh
 iphone_command=$OUT_DIR/commands/collect-iphone-testflight-evidence.sh
 macos_command=$OUT_DIR/commands/collect-macos-testflight-evidence.sh
+final_readiness_command=$OUT_DIR/commands/final-readiness-check.sh
 windows_runtime_template=$OUT_DIR/templates/windows-runtime-smoke.ps1
 windows_installer_template=$OUT_DIR/templates/windows-installer-smoke.ps1
 server_template=$OUT_DIR/templates/server-production-final.sh

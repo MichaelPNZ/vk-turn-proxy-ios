@@ -95,7 +95,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\package-windows-installer.ps1
 After the installer is copied or built under `build/windows-installer/`, the main release packager includes it automatically:
 
 ```bash
-scripts/package-release-artifacts.sh v1.0-build157
+scripts/package-release-artifacts.sh v1.0-build158
 ```
 
 Optional Authenticode signing:

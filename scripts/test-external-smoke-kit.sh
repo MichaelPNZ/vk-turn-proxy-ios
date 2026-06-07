@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TAG="${TAG:-v1.0-build157}"
+TAG="${TAG:-v1.0-build158}"
 OUT_DIR="$(mktemp -d "$ROOT_DIR/build/test-external-smoke-kit-$TAG.XXXXXX")"
 MANIFEST="$ROOT_DIR/build/release/$TAG-cross-platform-sha256.txt"
 created_manifest=0
@@ -32,6 +32,7 @@ required=(
   commands/android-physical-smoke.sh
   commands/collect-iphone-testflight-evidence.sh
   commands/collect-macos-testflight-evidence.sh
+  commands/final-readiness-check.sh
   templates/windows-runtime-smoke.ps1
   templates/windows-installer-smoke.ps1
   templates/server-production-final.sh
@@ -50,18 +51,23 @@ bash -n \
   "$OUT_DIR/commands/android-physical-smoke.sh" \
   "$OUT_DIR/commands/collect-iphone-testflight-evidence.sh" \
   "$OUT_DIR/commands/collect-macos-testflight-evidence.sh" \
+  "$OUT_DIR/commands/final-readiness-check.sh" \
   "$OUT_DIR/templates/server-production-final.sh"
 
 grep -q '^result=prepared$' "$OUT_DIR/summary.txt"
-grep -q "scripts/final-release-readiness.sh \"$TAG\"" "$OUT_DIR/README.md"
+grep -q 'commands/final-readiness-check.sh' "$OUT_DIR/README.md"
 grep -q '^export ANDROID_PHYSICAL_SMOKE_EVIDENCE=' "$OUT_DIR/templates/final-readiness.env.example"
 grep -q '^export SERVER_PRODUCTION_SMOKE_EVIDENCE=' "$OUT_DIR/templates/final-readiness.env.example"
+grep -q '^final_readiness_command=' "$OUT_DIR/summary.txt"
 grep -q '^apple_secrets_command=' "$OUT_DIR/summary.txt"
 grep -q 'DRY_RUN="${DRY_RUN:-1}"' "$OUT_DIR/commands/apple-testflight-secrets.sh"
 grep -q 'CONFIRM_WRITE_GITHUB_SECRETS' "$OUT_DIR/commands/apple-testflight-secrets.sh"
 grep -q -- '--profiles-from-dir "$PROFILE_DIR"' "$OUT_DIR/commands/apple-testflight-secrets.sh"
 grep -q -- '--appstore-env "$APPSTORE_ENV"' "$OUT_DIR/commands/apple-testflight-secrets.sh"
 grep -q 'REQUIRE_PHYSICAL_DEVICE=1' "$OUT_DIR/commands/android-physical-smoke.sh"
+grep -q 'Missing concrete value for $name' "$OUT_DIR/commands/final-readiness-check.sh"
+grep -q 'Evidence directory does not exist for $name' "$OUT_DIR/commands/final-readiness-check.sh"
+grep -q 'scripts/final-release-readiness.sh "$TAG"' "$OUT_DIR/commands/final-readiness-check.sh"
 grep -q 'CONFIRM_PRODUCTION_PROMOTE=142.252.220.91:56004' "$OUT_DIR/templates/server-production-final.sh"
 grep -q 'exit 64' "$OUT_DIR/templates/server-production-final.sh"
 
