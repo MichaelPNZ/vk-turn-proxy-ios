@@ -193,6 +193,65 @@ require_windows_runtime_evidence() {
   pass "WINDOWS_RUNTIME_SMOKE_EVIDENCE passed summary.json evidence contract: $value"
 }
 
+require_windows_installer_evidence() {
+  local value="${WINDOWS_INSTALLER_SMOKE_EVIDENCE:-}"
+  if [[ -z "$value" ]]; then
+    external_blocker "WINDOWS_INSTALLER_SMOKE_EVIDENCE is not set (Windows EXE build/sign/install smoke)"
+    return
+  fi
+  if [[ ! -d "$value" ]]; then
+    external_blocker "WINDOWS_INSTALLER_SMOKE_EVIDENCE must be an evidence directory: $value"
+    return
+  fi
+  local summary="$value/summary.txt"
+  if [[ ! -f "$summary" ]]; then
+    external_blocker "WINDOWS_INSTALLER_SMOKE_EVIDENCE missing summary.txt: $summary"
+    return
+  fi
+  if ! grep -q '^result=passed$' "$summary"; then
+    external_blocker "WINDOWS_INSTALLER_SMOKE_EVIDENCE summary does not contain result=passed: $summary"
+    return
+  fi
+  if ! grep -q '^evidence_type=windows_installer_smoke$' "$summary"; then
+    external_blocker "WINDOWS_INSTALLER_SMOKE_EVIDENCE summary does not contain evidence_type=windows_installer_smoke: $summary"
+    return
+  fi
+  local attachment_count
+  attachment_count="$(summary_txt_value "$summary" attachment_count)"
+  if [[ ! "$attachment_count" =~ ^[1-9][0-9]*$ ]]; then
+    external_blocker "WINDOWS_INSTALLER_SMOKE_EVIDENCE summary must contain attachment_count > 0: $summary"
+    return
+  fi
+  local key
+  for key in installer_built signature_verified installed_cleanly launched_cleanly uninstalled_cleanly; do
+    if [[ "$(summary_txt_value "$summary" "$key")" != "1" ]]; then
+      external_blocker "WINDOWS_INSTALLER_SMOKE_EVIDENCE summary must contain $key=1: $summary"
+      return
+    fi
+  done
+  local installer_sha256
+  installer_sha256="$(summary_txt_value "$summary" installer_sha256)"
+  if [[ ! "$installer_sha256" =~ ^[a-fA-F0-9]{64}$ ]]; then
+    external_blocker "WINDOWS_INSTALLER_SMOKE_EVIDENCE summary must contain a 64-hex installer_sha256: $summary"
+    return
+  fi
+  require_file_in_dir WINDOWS_INSTALLER_SMOKE_EVIDENCE "$value" "installer-build-transcript.txt" || return
+  require_file_in_dir WINDOWS_INSTALLER_SMOKE_EVIDENCE "$value" "authenticode-signature.txt" || return
+  require_file_in_dir WINDOWS_INSTALLER_SMOKE_EVIDENCE "$value" "installer-sha256.txt" || return
+  require_file_in_dir WINDOWS_INSTALLER_SMOKE_EVIDENCE "$value" "install-transcript.txt" || return
+  require_file_in_dir WINDOWS_INSTALLER_SMOKE_EVIDENCE "$value" "launch-or-service-smoke.txt" || return
+  require_file_in_dir WINDOWS_INSTALLER_SMOKE_EVIDENCE "$value" "uninstall-transcript.txt" || return
+  if ! grep -Eqi 'Status[[:space:]]*:[[:space:]]*Valid([[:space:]]|$)' "$value/authenticode-signature.txt"; then
+    external_blocker "WINDOWS_INSTALLER_SMOKE_EVIDENCE authenticode-signature.txt must contain a valid signature status"
+    return
+  fi
+  if ! grep -qi "$installer_sha256" "$value/installer-sha256.txt"; then
+    external_blocker "WINDOWS_INSTALLER_SMOKE_EVIDENCE installer-sha256.txt must contain installer_sha256 from summary"
+    return
+  fi
+  pass "WINDOWS_INSTALLER_SMOKE_EVIDENCE passed installer evidence contract: $value"
+}
+
 require_android_physical_evidence() {
   local value="${ANDROID_PHYSICAL_SMOKE_EVIDENCE:-}"
   if [[ -z "$value" ]]; then
@@ -445,6 +504,7 @@ check_shell_syntax \
   scripts/test-server-deploy-safety.sh \
   scripts/test-android-physical-evidence-contract.sh \
   scripts/test-windows-runtime-evidence-contract.sh \
+  scripts/test-windows-installer-evidence-contract.sh \
   scripts/test-apple-smoke-evidence-contract.sh \
   scripts/test-server-production-evidence-contract.sh \
   scripts/test-external-smoke-kit.sh \
@@ -462,6 +522,7 @@ run_required "release manifest format test" scripts/test-release-manifest-format
 run_required "server deploy safety test" scripts/test-server-deploy-safety.sh
 run_required "android physical evidence contract test" scripts/test-android-physical-evidence-contract.sh
 run_required "windows runtime evidence contract test" scripts/test-windows-runtime-evidence-contract.sh
+run_required "windows installer evidence contract test" scripts/test-windows-installer-evidence-contract.sh
 run_required "apple smoke evidence contract test" scripts/test-apple-smoke-evidence-contract.sh
 run_required "server production evidence contract test" scripts/test-server-production-evidence-contract.sh
 run_required "external smoke kit test" scripts/test-external-smoke-kit.sh
@@ -495,7 +556,7 @@ require_android_physical_evidence
 require_apple_smoke_evidence IPHONE_TESTFLIGHT_SMOKE_EVIDENCE iphone_testflight_network_extension iphone "iPhone TestFlight Network Extension smoke"
 require_apple_smoke_evidence MACOS_TESTFLIGHT_SMOKE_EVIDENCE macos_testflight_packet_tunnel macos "signed macOS Packet Tunnel smoke"
 require_windows_runtime_evidence
-require_summary_txt_evidence WINDOWS_INSTALLER_SMOKE_EVIDENCE windows_installer_smoke "Windows EXE build/sign/install smoke"
+require_windows_installer_evidence
 require_server_production_evidence
 
 printf '\nFinal readiness summary: %d failure(s), %d warning(s)\n' "$failures" "$warnings"

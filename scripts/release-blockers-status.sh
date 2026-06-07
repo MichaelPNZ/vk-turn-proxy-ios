@@ -124,6 +124,30 @@ has_windows_runtime_smoke_passed() {
   grep -q '"state"[[:space:]]*:[[:space:]]*"stopped"' "$dir/status-stopped.json" || return 1
 }
 
+has_windows_installer_smoke_passed() {
+  local dir="$1"
+  local summary="$dir/summary.txt"
+  [[ -f "$summary" ]] || return 1
+  grep -q '^result=passed$' "$summary" || return 1
+  grep -q '^evidence_type=windows_installer_smoke$' "$summary" || return 1
+  [[ "$(summary_value "$summary" attachment_count)" =~ ^[1-9][0-9]*$ ]] || return 1
+  local key
+  for key in installer_built signature_verified installed_cleanly launched_cleanly uninstalled_cleanly; do
+    [[ "$(summary_value "$summary" "$key")" == "1" ]] || return 1
+  done
+  local installer_sha256
+  installer_sha256="$(summary_value "$summary" installer_sha256)"
+  [[ "$installer_sha256" =~ ^[a-fA-F0-9]{64}$ ]] || return 1
+  [[ -f "$dir/installer-build-transcript.txt" ]] || return 1
+  [[ -f "$dir/authenticode-signature.txt" ]] || return 1
+  [[ -f "$dir/installer-sha256.txt" ]] || return 1
+  [[ -f "$dir/install-transcript.txt" ]] || return 1
+  [[ -f "$dir/launch-or-service-smoke.txt" ]] || return 1
+  [[ -f "$dir/uninstall-transcript.txt" ]] || return 1
+  grep -Eqi 'Status[[:space:]]*:[[:space:]]*Valid([[:space:]]|$)' "$dir/authenticode-signature.txt" || return 1
+  grep -qi "$installer_sha256" "$dir/installer-sha256.txt" || return 1
+}
+
 has_server_production_smoke_passed() {
   local dir="$1"
   local summary="$dir/summary.txt"
@@ -327,10 +351,10 @@ check_windows() {
   fi
 
   if [[ -n "${WINDOWS_INSTALLER_SMOKE_EVIDENCE:-}" ]] &&
-    has_summary_type_passed "$WINDOWS_INSTALLER_SMOKE_EVIDENCE" windows_installer_smoke; then
+    has_windows_installer_smoke_passed "$WINDOWS_INSTALLER_SMOKE_EVIDENCE"; then
     write_status windows ready "installer_smoke=$WINDOWS_INSTALLER_SMOKE_EVIDENCE"
   else
-    write_status windows blocked "WINDOWS_INSTALLER_SMOKE_EVIDENCE_missing_or_not_passed"
+    write_status windows blocked "WINDOWS_INSTALLER_SMOKE_EVIDENCE_missing_or_contract_failed"
   fi
 }
 

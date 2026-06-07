@@ -193,17 +193,37 @@ powershell -ExecutionPolicy Bypass -File .\uninstall-service.ps1
 `install-service.ps1` is idempotent: it creates or updates `VKTurnProxyTunnel`. `export-logs.ps1` writes `config\diagnostics.json` even if the service is not running, using the latest ProgramData status/log files when available.
 
 After building/signing/installing the Inno Setup EXE on Windows, put the
-installer transcript, signature verification, and install smoke output into an
-evidence directory, then write:
+installer transcript, signature verification, install smoke output, and
+uninstall transcript into an evidence directory. Final readiness requires these
+supporting files:
+
+- `installer-build-transcript.txt`
+- `authenticode-signature.txt`
+- `installer-sha256.txt`
+- `install-transcript.txt`
+- `launch-or-service-smoke.txt`
+- `uninstall-transcript.txt`
+
+Then write the summary and append the installer-specific markers:
 
 ```powershell
 bash scripts/write-smoke-evidence-summary.sh `
   windows_installer_smoke `
   build/evidence/windows-installer-<date>
+
+@"
+installer_built=1
+signature_verified=1
+installed_cleanly=1
+launched_cleanly=1
+uninstalled_cleanly=1
+installer_sha256=<64-hex-sha256>
+"@ | Add-Content build/evidence/windows-installer-<date>/summary.txt
 ```
 
 Use that directory as `WINDOWS_INSTALLER_SMOKE_EVIDENCE`.
-The directory must contain at least one supporting file besides `summary.txt`.
+`authenticode-signature.txt` must include `Status: Valid`, and
+`installer-sha256.txt` must contain the same SHA-256 as `installer_sha256`.
 
 Local preflight from this repository:
 

@@ -173,18 +173,66 @@ PS1
 
 cat > "$OUT_DIR/templates/windows-installer-smoke.ps1" <<'PS1'
 # Run on Windows after copying the repository or release artifacts.
-# Requires Inno Setup 6. SignCertSha1 is optional.
+# Requires Inno Setup 6 and a code-signing certificate for final release.
 
+$LatestEvidenceDir = ".\build\evidence\windows-installer-latest"
+New-Item -ItemType Directory -Force -Path $LatestEvidenceDir | Out-Null
+$SignCertSha1 = $env:WINDOWS_SIGN_CERT_SHA1
+if ([string]::IsNullOrWhiteSpace($SignCertSha1)) {
+  throw "Set WINDOWS_SIGN_CERT_SHA1 to the Windows code-signing certificate SHA1 before final installer smoke."
+}
 powershell -ExecutionPolicy Bypass -File .\scripts\package-windows-installer.ps1 `
   -RuntimeZip .\build\windows-package\vk-turn-proxy-windows-runtime.zip `
-  -Version 1.0.$BUILD_NUM
+  -Version 1.0.$BUILD_NUM `
+  -SignCertSha1 $SignCertSha1 `
+  *>&1 | Tee-Object -FilePath "$LatestEvidenceDir\installer-build-transcript.txt"
 
-# Install the generated setup EXE as Administrator, verify shortcuts/service
-# install/uninstall, then put transcript/signature/install evidence files into:
-#   build\evidence\windows-installer-<date>
+$Installer = Get-ChildItem .\build\windows-installer\vk-turn-proxy-windows-*-setup.exe |
+  Sort-Object LastWriteTime -Descending |
+  Select-Object -First 1
+if (!$Installer) { throw "Installer EXE not found." }
+
+$EvidenceDir = ".\build\evidence\windows-installer-$((Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmss'))"
+New-Item -ItemType Directory -Force -Path $EvidenceDir | Out-Null
+Copy-Item "$LatestEvidenceDir\installer-build-transcript.txt" "$EvidenceDir\installer-build-transcript.txt"
+Get-AuthenticodeSignature $Installer.FullName | Format-List * |
+  Tee-Object -FilePath "$EvidenceDir\authenticode-signature.txt"
+Get-FileHash -Algorithm SHA256 $Installer.FullName |
+  Tee-Object -FilePath "$EvidenceDir\installer-sha256.txt"
+
+# Install the generated setup EXE as Administrator, then record install output:
+#   <installer.exe> /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG="$EvidenceDir\install-transcript.txt"
 #
-# Then write final summary:
-# bash scripts/write-smoke-evidence-summary.sh windows_installer_smoke build/evidence/windows-installer-<date>
+# Verify shortcuts/service and record output into:
+#   $EvidenceDir\launch-or-service-smoke.txt
+#
+# Uninstall cleanly and record output into:
+#   $EvidenceDir\uninstall-transcript.txt
+#
+# Then run the summary block below.
+$RequiredEvidence = @(
+  "$EvidenceDir\installer-build-transcript.txt",
+  "$EvidenceDir\authenticode-signature.txt",
+  "$EvidenceDir\installer-sha256.txt",
+  "$EvidenceDir\install-transcript.txt",
+  "$EvidenceDir\launch-or-service-smoke.txt",
+  "$EvidenceDir\uninstall-transcript.txt"
+)
+foreach ($Path in $RequiredEvidence) {
+  if (!(Test-Path $Path)) { throw "Missing Windows installer evidence file: $Path" }
+}
+$Hash = (Get-FileHash -Algorithm SHA256 $Installer.FullName).Hash.ToLowerInvariant()
+bash scripts/write-smoke-evidence-summary.sh windows_installer_smoke $EvidenceDir
+@"
+installer_built=1
+signature_verified=1
+installed_cleanly=1
+launched_cleanly=1
+uninstalled_cleanly=1
+installer_sha256=$Hash
+"@ | Add-Content "$EvidenceDir\summary.txt"
+
+Write-Host "Set WINDOWS_INSTALLER_SMOKE_EVIDENCE to $EvidenceDir."
 PS1
 
 cat > "$OUT_DIR/templates/server-production-final.sh" <<'SH'
