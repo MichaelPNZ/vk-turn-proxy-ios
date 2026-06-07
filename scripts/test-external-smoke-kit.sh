@@ -28,6 +28,7 @@ required=(
   README.md
   summary.txt
   cross-platform-sha256.txt
+  commands/apple-testflight-secrets.sh
   commands/android-physical-smoke.sh
   commands/collect-iphone-testflight-evidence.sh
   commands/collect-macos-testflight-evidence.sh
@@ -45,6 +46,7 @@ for file in "${required[@]}"; do
 done
 
 bash -n \
+  "$OUT_DIR/commands/apple-testflight-secrets.sh" \
   "$OUT_DIR/commands/android-physical-smoke.sh" \
   "$OUT_DIR/commands/collect-iphone-testflight-evidence.sh" \
   "$OUT_DIR/commands/collect-macos-testflight-evidence.sh" \
@@ -54,6 +56,11 @@ grep -q '^result=prepared$' "$OUT_DIR/summary.txt"
 grep -q "scripts/final-release-readiness.sh \"$TAG\"" "$OUT_DIR/README.md"
 grep -q '^export ANDROID_PHYSICAL_SMOKE_EVIDENCE=' "$OUT_DIR/templates/final-readiness.env.example"
 grep -q '^export SERVER_PRODUCTION_SMOKE_EVIDENCE=' "$OUT_DIR/templates/final-readiness.env.example"
+grep -q '^apple_secrets_command=' "$OUT_DIR/summary.txt"
+grep -q 'DRY_RUN="${DRY_RUN:-1}"' "$OUT_DIR/commands/apple-testflight-secrets.sh"
+grep -q 'CONFIRM_WRITE_GITHUB_SECRETS' "$OUT_DIR/commands/apple-testflight-secrets.sh"
+grep -q -- '--profiles-from-dir "$PROFILE_DIR"' "$OUT_DIR/commands/apple-testflight-secrets.sh"
+grep -q -- '--appstore-env "$APPSTORE_ENV"' "$OUT_DIR/commands/apple-testflight-secrets.sh"
 grep -q 'REQUIRE_PHYSICAL_DEVICE=1' "$OUT_DIR/commands/android-physical-smoke.sh"
 grep -q 'CONFIRM_PRODUCTION_PROMOTE=142.252.220.91:56004' "$OUT_DIR/templates/server-production-final.sh"
 grep -q 'exit 64' "$OUT_DIR/templates/server-production-final.sh"

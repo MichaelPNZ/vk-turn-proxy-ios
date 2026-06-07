@@ -59,6 +59,14 @@ Use it to collect final evidence for Android physical-device, iPhone TestFlight,
 signed macOS Packet Tunnel, Windows runtime/installer, and production
 server/client smoke gates.
 
+Apple TestFlight secrets dry-run:
+
+\`\`\`bash
+CERT_P12=/absolute/path/AppleDistribution.p12 \\
+CERT_PASSWORD='<p12 password>' \\
+"$OUT_DIR/commands/apple-testflight-secrets.sh"
+\`\`\`
+
 Final readiness command template:
 
 \`\`\`bash
@@ -72,6 +80,64 @@ Current cross-platform artifacts:
 $(cat "$manifest")
 \`\`\`
 EOF
+
+cat > "$OUT_DIR/commands/apple-testflight-secrets.sh" <<SH
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")/../../../.." && pwd)"
+REPO="\${REPO:-MichaelPNZ/vk-turn-proxy-ios}"
+TAG="\${TAG:-$TAG}"
+TARGET="\${TARGET:-all}"
+CERT_P12="\${CERT_P12:-}"
+CERT_PASSWORD="\${CERT_PASSWORD:-}"
+APPSTORE_ENV="\${APPSTORE_ENV:-"\$ROOT_DIR/VKTurnProxy/AppStoreConnect.env"}"
+PROFILE_DIR="\${PROFILE_DIR:-"\$HOME/Library/MobileDevice/Provisioning Profiles"}"
+DRY_RUN="\${DRY_RUN:-1}"
+CONFIRM_WRITE_GITHUB_SECRETS="\${CONFIRM_WRITE_GITHUB_SECRETS:-}"
+
+if [[ -z "\$CERT_P12" || -z "\$CERT_PASSWORD" ]]; then
+  cat >&2 <<'EOF'
+Set:
+  CERT_P12=/absolute/path/AppleDistribution.p12
+  CERT_PASSWORD='<p12 password>'
+
+Optional:
+  APPSTORE_ENV=/absolute/path/to/AppStoreConnect.env
+  PROFILE_DIR=/absolute/path/to/Provisioning Profiles
+  DRY_RUN=0
+  CONFIRM_WRITE_GITHUB_SECRETS=MichaelPNZ/vk-turn-proxy-ios
+EOF
+  exit 64
+fi
+
+if [[ "\$DRY_RUN" != "1" && "\$CONFIRM_WRITE_GITHUB_SECRETS" != "\$REPO" ]]; then
+  echo "Refusing to write GitHub secrets without CONFIRM_WRITE_GITHUB_SECRETS=\$REPO" >&2
+  exit 64
+fi
+
+DRY_RUN="\$DRY_RUN" REPO="\$REPO" \\
+"\$ROOT_DIR/scripts/configure-github-testflight-secrets.sh" \\
+  --cert-p12 "\$CERT_P12" \\
+  --cert-password "\$CERT_PASSWORD" \\
+  --profiles-from-dir "\$PROFILE_DIR" \\
+  --appstore-env "\$APPSTORE_ENV"
+
+if [[ "\$DRY_RUN" == "1" ]]; then
+  cat <<EOF
+Dry-run passed. To write GitHub secrets, rerun with:
+  DRY_RUN=0 CONFIRM_WRITE_GITHUB_SECRETS=\$REPO CERT_P12=... CERT_PASSWORD=... \\
+    \$0
+EOF
+else
+  cat <<EOF
+GitHub TestFlight secrets written for \$REPO.
+Next:
+  gh workflow run testflight-release.yml --repo \$REPO --ref main -f tag=\$TAG -f target=\$TARGET
+EOF
+fi
+SH
+chmod +x "$OUT_DIR/commands/apple-testflight-secrets.sh"
 
 cat > "$OUT_DIR/commands/android-physical-smoke.sh" <<'SH'
 #!/usr/bin/env bash
@@ -288,6 +354,7 @@ created_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 kit_dir=$OUT_DIR
 manifest=$OUT_DIR/cross-platform-sha256.txt
 android_command=$OUT_DIR/commands/android-physical-smoke.sh
+apple_secrets_command=$OUT_DIR/commands/apple-testflight-secrets.sh
 iphone_command=$OUT_DIR/commands/collect-iphone-testflight-evidence.sh
 macos_command=$OUT_DIR/commands/collect-macos-testflight-evidence.sh
 windows_runtime_template=$OUT_DIR/templates/windows-runtime-smoke.ps1

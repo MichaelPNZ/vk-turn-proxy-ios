@@ -166,7 +166,7 @@ Current verification:
   `:56004`, admin TCP `:56080`, `healthz=ok`, `readyz=ready`, exported
   `vk_turn_proxy_*` metrics, and a non-empty production client smoke log.
 - `scripts/final-release-readiness.sh <tag>` requires production-port smoke evidence before final release readiness can pass.
-- `scripts/prepare-external-smoke-kit.sh <tag>` creates a no-secrets handoff kit under `build/external-smoke-kit/<tag>/` with external smoke commands/templates and final readiness env placeholders.
+- `scripts/prepare-external-smoke-kit.sh <tag>` creates a no-secrets handoff kit under `build/external-smoke-kit/<tag>/` with the guarded TestFlight secrets dry-run/write wrapper, external smoke commands/templates, and final readiness env placeholders.
 - `scripts/release-blockers-status.sh <tag>` produces a read-only readiness snapshot under `build/release-status/<tag>/` with current GitHub CI/artifact, TestFlight workflow/secrets, Android physical-device, Apple signing/TestFlight, Windows, and production-server blocker status.
 
 Remaining:
