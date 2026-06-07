@@ -19,6 +19,8 @@ grep -q 'certutil.exe' "$ROOT_DIR/scripts/build-windows-service.sh"
 grep -q 'sha256sum' "$ROOT_DIR/scripts/build-windows-service.sh"
 grep -q 'certutil.exe' "$ROOT_DIR/scripts/package-windows-runtime.sh"
 grep -q 'sha256sum' "$ROOT_DIR/scripts/package-windows-runtime.sh"
+grep -q 'vk-turn-proxy-windows-package-smoke-' "$ROOT_DIR/scripts/release-blockers-status.sh"
+grep -q 'package_ci_smoke=' "$ROOT_DIR/scripts/release-blockers-status.sh"
 
 if grep -q 'evidenceType = "windows_runtime_smoke"' "$SCRIPT"; then
   echo "Package CI smoke must not claim final windows_runtime_smoke evidence." >&2
