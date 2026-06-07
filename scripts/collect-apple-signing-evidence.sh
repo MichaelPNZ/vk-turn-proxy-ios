@@ -222,7 +222,7 @@ cat > "$EVIDENCE_DIR/next-commands.txt" <<'EOF'
 5. Remove revoked code-signing identities from keychain.
 6. Re-run:
    scripts/collect-apple-signing-evidence.sh build/evidence/apple-signing-current
-   scripts/preflight-testflight.sh v1.0-build167
+   scripts/preflight-testflight.sh v1.0-build168
 EOF
 
 cat > "$EVIDENCE_DIR/summary.txt" <<EOF

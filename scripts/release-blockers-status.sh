@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TAG="${1:-v1.0-build167}"
+TAG="${1:-v1.0-build168}"
 ANDROID_HOME="${ANDROID_HOME:-"$HOME/Library/Android/sdk"}"
 HOST="${HOST:-142.252.220.91}"
 SSH_USER="${SSH_USER:-root}"
@@ -269,6 +269,22 @@ check_github() {
       write_status windows ready "package_ci_smoke=$windows_package_artifact_name size=$windows_package_artifact_size"
     else
       write_status windows blocked "WINDOWS_PACKAGE_CI_SMOKE_ARTIFACT_expired name=$windows_package_artifact_name"
+    fi
+  fi
+
+  local windows_installer_artifact
+  windows_installer_artifact="$(gh api "repos/MichaelPNZ/vk-turn-proxy-ios/actions/runs/$run_id/artifacts" \
+    --jq '.artifacts[] | select(.name | startswith("vk-turn-proxy-windows-installer-package-smoke-")) | [.name, .size_in_bytes, .expired] | @tsv' \
+    | head -1 || true)"
+  if [[ -z "$windows_installer_artifact" ]]; then
+    write_status windows blocked "WINDOWS_INSTALLER_PACKAGE_CI_SMOKE_ARTIFACT_missing run=$run_id"
+  else
+    local windows_installer_artifact_name windows_installer_artifact_size windows_installer_artifact_expired
+    IFS=$'\t' read -r windows_installer_artifact_name windows_installer_artifact_size windows_installer_artifact_expired <<<"$windows_installer_artifact"
+    if [[ "$windows_installer_artifact_expired" == "false" ]]; then
+      write_status windows ready "installer_package_ci_smoke=$windows_installer_artifact_name size=$windows_installer_artifact_size"
+    else
+      write_status windows blocked "WINDOWS_INSTALLER_PACKAGE_CI_SMOKE_ARTIFACT_expired name=$windows_installer_artifact_name"
     fi
   fi
 

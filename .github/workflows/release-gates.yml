@@ -35,7 +35,7 @@ jobs:
           if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "${GITHUB_REF_NAME:-}" =~ build[0-9]+$ ]]; then
             tag="$GITHUB_REF_NAME"
           else
-            tag="v1.0-build167"
+            tag="v1.0-build168"
           fi
           echo "TAG=$tag" >> "$GITHUB_ENV"
           echo "Using TAG=$tag"
@@ -161,7 +161,7 @@ jobs:
             build/external-smoke-kit/${{ env.TAG }}/
 
   windows-runtime-package-smoke:
-    name: Windows Runtime Package Smoke
+    name: Windows Package Smokes
     runs-on: windows-latest
     timeout-minutes: 45
 
@@ -192,6 +192,18 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Select release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" && "${GITHUB_REF_NAME:-}" =~ build[0-9]+$ ]]; then
+            tag="$GITHUB_REF_NAME"
+          else
+            tag="v1.0-build168"
+          fi
+          echo "TAG=$tag" >> "$GITHUB_ENV"
+          echo "Using TAG=$tag"
+
       - name: Install Android SDK packages
         shell: bash
         run: |
@@ -213,9 +225,26 @@ jobs:
         shell: pwsh
         run: scripts/smoke-windows-runtime-package-ci.ps1
 
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      - name: Smoke Windows installer package
+        shell: pwsh
+        run: scripts/smoke-windows-installer-package-ci.ps1 -Version ($env:TAG -replace '^v','')
+
       - name: Upload Windows package smoke evidence
         uses: actions/upload-artifact@v4
         with:
           name: vk-turn-proxy-windows-package-smoke-${{ github.run_id }}
           if-no-files-found: error
           path: build/evidence/windows-runtime-package-ci-smoke/
+
+      - name: Upload Windows installer package smoke
+        uses: actions/upload-artifact@v4
+        with:
+          name: vk-turn-proxy-windows-installer-package-smoke-${{ github.run_id }}
+          if-no-files-found: error
+          path: |
+            build/evidence/windows-installer-package-ci-smoke/
+            build/windows-installer/vk-turn-proxy-windows-*-setup.exe

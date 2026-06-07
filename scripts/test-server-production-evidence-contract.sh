@@ -67,7 +67,7 @@ RUN_APPLE_SIGNING=0 \
 RUN_SERVER_BASELINE=0 \
     RUN_SERVER_STAGING=0 \
 SERVER_PRODUCTION_SMOKE_EVIDENCE="$valid" \
-"$ROOT_DIR/scripts/release-blockers-status.sh" v1.0-build167 > "$TMP_DIR/valid.out"
+"$ROOT_DIR/scripts/release-blockers-status.sh" v1.0-build168 > "$TMP_DIR/valid.out"
 
 grep -q $'^server\tready\tproduction_smoke=' "$TMP_DIR/status-valid/status.tsv"
 
@@ -77,7 +77,7 @@ RUN_APPLE_SIGNING=0 \
 RUN_SERVER_BASELINE=0 \
     RUN_SERVER_STAGING=0 \
 SERVER_PRODUCTION_SMOKE_EVIDENCE="$weak" \
-"$ROOT_DIR/scripts/release-blockers-status.sh" v1.0-build167 > "$TMP_DIR/weak.out"
+"$ROOT_DIR/scripts/release-blockers-status.sh" v1.0-build168 > "$TMP_DIR/weak.out"
 
 grep -q $'^server\tblocked\tSERVER_PRODUCTION_SMOKE_EVIDENCE_missing_or_contract_failed$' "$TMP_DIR/status-weak/status.tsv"
 if grep -q $'^server\tready\tproduction_smoke=' "$TMP_DIR/status-weak/status.tsv"; then

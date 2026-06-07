@@ -4,11 +4,13 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEMPLATE="$ROOT_DIR/packaging/windows/inno/vk-turn-proxy.iss.tpl"
 SCRIPT="$ROOT_DIR/scripts/package-windows-installer.ps1"
+CI_SMOKE="$ROOT_DIR/scripts/smoke-windows-installer-package-ci.ps1"
 RELEASE_PACKAGER="$ROOT_DIR/scripts/package-release-artifacts.sh"
 RUNTIME_DIR="$ROOT_DIR/build/windows-package/vk-turn-proxy-windows"
 
 [[ -f "$TEMPLATE" ]] || { echo "Missing $TEMPLATE" >&2; exit 1; }
 [[ -f "$SCRIPT" ]] || { echo "Missing $SCRIPT" >&2; exit 1; }
+[[ -f "$CI_SMOKE" ]] || { echo "Missing $CI_SMOKE" >&2; exit 1; }
 [[ -f "$RELEASE_PACKAGER" ]] || { echo "Missing $RELEASE_PACKAGER" >&2; exit 1; }
 
 grep -q 'PrivilegesRequired=admin' "$TEMPLATE"
@@ -18,6 +20,11 @@ grep -q 'install-service.ps1' "$TEMPLATE"
 grep -q 'signtool' "$SCRIPT"
 grep -q 'Inno Setup 6\\ISCC.exe' "$SCRIPT"
 grep -q 'Expand-Archive' "$SCRIPT"
+grep -q 'windows_installer_package_ci_smoke' "$CI_SMOKE"
+grep -q 'Get-AuthenticodeSignature' "$CI_SMOKE"
+grep -q 'signed = (\$signatureStatus -eq "Valid")' "$CI_SMOKE"
+grep -q 'vk-turn-proxy-windows-installer-package-smoke-' "$ROOT_DIR/.github/workflows/release-gates.yml"
+grep -q 'installer_package_ci_smoke=' "$ROOT_DIR/scripts/release-blockers-status.sh"
 grep -q 'add_optional_windows_installer' "$RELEASE_PACKAGER"
 grep -Fq 'vk-turn-proxy-windows-*-setup.exe' "$RELEASE_PACKAGER"
 grep -q 'smoke-windows-runtime.ps1' "$ROOT_DIR/scripts/package-windows-runtime.sh"
@@ -32,7 +39,7 @@ grep -q 'install-wintun.ps1' "$ROOT_DIR/scripts/package-windows-runtime.sh"
 grep -q 'https://www.wintun.net/builds/wintun-0.14.1.zip' "$ROOT_DIR/scripts/package-windows-runtime.sh"
 grep -q '07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51' "$ROOT_DIR/scripts/package-windows-runtime.sh"
 
-if grep -R '/Users/' "$TEMPLATE" "$SCRIPT" >/dev/null; then
+if grep -R '/Users/' "$TEMPLATE" "$SCRIPT" "$CI_SMOKE" >/dev/null; then
   echo "Installer packaging files must not contain local absolute paths." >&2
   exit 1
 fi
