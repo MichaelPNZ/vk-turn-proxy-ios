@@ -7,6 +7,7 @@ Requires=wg-quick@wg-vkturn.service
 
 [Service]
 Type=simple
+Environment=VKTURN_MAX_SESSIONS=1024
 EnvironmentFile=/etc/vk-turn-proxy-ios.env
 ExecStart=/usr/local/bin/vk-turn-proxy-server \
   -listen ${VKTURN_LISTEN} \
@@ -14,7 +15,8 @@ ExecStart=/usr/local/bin/vk-turn-proxy-server \
   -srtp \
   -logfile ${VKTURN_LOGFILE} \
   -health-listen ${VKTURN_HEALTH_LISTEN} \
-  -session-idle-timeout ${VKTURN_SESSION_IDLE_TIMEOUT}
+  -session-idle-timeout ${VKTURN_SESSION_IDLE_TIMEOUT} \
+  -max-sessions ${VKTURN_MAX_SESSIONS}
 Restart=always
 RestartSec=3
 LimitNOFILE=1048576

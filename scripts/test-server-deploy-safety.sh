@@ -62,5 +62,13 @@ if ! grep -q 'after-auto-rollback' "$ROOT_DIR/scripts/deploy-server-vps.sh"; the
   echo "Promote path does not write after-auto-rollback evidence." >&2
   exit 1
 fi
+if ! grep -q 'Environment=VKTURN_MAX_SESSIONS=1024' "$ROOT_DIR/deploy/server/vk-turn-proxy-ios.service"; then
+  echo "Systemd unit does not set a safe VKTURN_MAX_SESSIONS fallback." >&2
+  exit 1
+fi
+if ! grep -q -- '-max-sessions ${VKTURN_MAX_SESSIONS}' "$ROOT_DIR/deploy/server/vk-turn-proxy-ios.service"; then
+  echo "Systemd unit does not pass VKTURN_MAX_SESSIONS to the server binary." >&2
+  exit 1
+fi
 
 printf 'server deploy safety ok\n'

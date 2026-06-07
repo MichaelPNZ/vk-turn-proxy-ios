@@ -9,7 +9,7 @@ on:
       tag:
         description: "Release tag to upload"
         required: true
-        default: "v1.0-build159"
+        default: "v1.0-build160"
       target:
         description: "Apple targets to upload"
         required: true

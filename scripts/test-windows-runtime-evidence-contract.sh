@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TAG="${TAG:-v1.0-build159}"
+TAG="${TAG:-v1.0-build160}"
 TMP_DIR="$(mktemp -d "$ROOT_DIR/build/test-windows-runtime-evidence.XXXXXX")"
 
 cleanup() {
