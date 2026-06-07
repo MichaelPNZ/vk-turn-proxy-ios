@@ -43,9 +43,9 @@ make_evidence() {
     printf 'vpn_stop_cleaned=1\n'
   } > "$dir/summary.txt"
   printf '%s\n' "$qemu" > "$dir/device-qemu.txt"
-  printf 'running\n' > "$dir/running-connectivity.txt"
+  printf 'VPN:com.vkturnproxy.android running\n' > "$dir/running-connectivity.txt"
   printf 'stopped\n' > "$dir/stopped-connectivity.txt"
-  printf 'logs\n' > "$dir/final-logcat-filtered.txt"
+  printf 'mobilebridge: WireGuard attached\n' > "$dir/final-logcat-filtered.txt"
 }
 
 run_status() {
@@ -74,6 +74,26 @@ run_status "$emulator" "$TMP_DIR/status-emulator"
 grep -q $'^android\tblocked\tANDROID_PHYSICAL_SMOKE_EVIDENCE_missing_or_contract_failed$' "$TMP_DIR/status-emulator/status.tsv"
 if grep -q $'^android\tready\tphysical_smoke_evidence=' "$TMP_DIR/status-emulator/status.tsv"; then
   echo "Emulator evidence must not pass Android physical smoke contract." >&2
+  exit 1
+fi
+
+weak="$TMP_DIR/weak"
+make_evidence "$weak" android_physical_smoke 1 0
+printf 'running without vpn marker\n' > "$weak/running-connectivity.txt"
+run_status "$weak" "$TMP_DIR/status-weak"
+grep -q $'^android\tblocked\tANDROID_PHYSICAL_SMOKE_EVIDENCE_missing_or_contract_failed$' "$TMP_DIR/status-weak/status.tsv"
+if grep -q $'^android\tready\tphysical_smoke_evidence=' "$TMP_DIR/status-weak/status.tsv"; then
+  echo "Android physical smoke evidence without VPN connectivity marker must not pass." >&2
+  exit 1
+fi
+
+dirty_stop="$TMP_DIR/dirty-stop"
+make_evidence "$dirty_stop" android_physical_smoke 1 0
+printf 'VPN:com.vkturnproxy.android still present\n' > "$dirty_stop/stopped-connectivity.txt"
+run_status "$dirty_stop" "$TMP_DIR/status-dirty-stop"
+grep -q $'^android\tblocked\tANDROID_PHYSICAL_SMOKE_EVIDENCE_missing_or_contract_failed$' "$TMP_DIR/status-dirty-stop/status.tsv"
+if grep -q $'^android\tready\tphysical_smoke_evidence=' "$TMP_DIR/status-dirty-stop/status.tsv"; then
+  echo "Android physical smoke evidence with VPN still present after stop must not pass." >&2
   exit 1
 fi
 

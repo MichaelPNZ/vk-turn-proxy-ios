@@ -98,6 +98,14 @@ has_android_physical_smoke_passed() {
   [[ -f "$dir/running-connectivity.txt" ]] || return 1
   [[ -f "$dir/stopped-connectivity.txt" ]] || return 1
   [[ -f "$dir/final-logcat-filtered.txt" ]] || return 1
+  grep -q 'VPN:com.vkturnproxy.android' "$dir/running-connectivity.txt" || return 1
+  if grep -q 'VPN:com.vkturnproxy.android' "$dir/stopped-connectivity.txt"; then
+    return 1
+  fi
+  grep -q 'mobilebridge: WireGuard attached' "$dir/final-logcat-filtered.txt" || return 1
+  if grep -Eqi 'FATAL EXCEPTION|WireGuard attach failed|CreateTUNFromFile failed|IpcSet failed' "$dir/final-logcat-filtered.txt"; then
+    return 1
+  fi
 }
 
 has_windows_runtime_smoke_passed() {

@@ -306,6 +306,22 @@ require_android_physical_evidence() {
   require_file_in_dir ANDROID_PHYSICAL_SMOKE_EVIDENCE "$value" "running-connectivity.txt" || return
   require_file_in_dir ANDROID_PHYSICAL_SMOKE_EVIDENCE "$value" "stopped-connectivity.txt" || return
   require_file_in_dir ANDROID_PHYSICAL_SMOKE_EVIDENCE "$value" "final-logcat-filtered.txt" || return
+  if ! grep -q 'VPN:com.vkturnproxy.android' "$value/running-connectivity.txt"; then
+    external_blocker "ANDROID_PHYSICAL_SMOKE_EVIDENCE running-connectivity.txt does not show VPN:com.vkturnproxy.android: $value/running-connectivity.txt"
+    return
+  fi
+  if grep -q 'VPN:com.vkturnproxy.android' "$value/stopped-connectivity.txt"; then
+    external_blocker "ANDROID_PHYSICAL_SMOKE_EVIDENCE stopped-connectivity.txt still shows VPN:com.vkturnproxy.android: $value/stopped-connectivity.txt"
+    return
+  fi
+  if ! grep -q 'mobilebridge: WireGuard attached' "$value/final-logcat-filtered.txt"; then
+    external_blocker "ANDROID_PHYSICAL_SMOKE_EVIDENCE final-logcat-filtered.txt does not show mobilebridge WireGuard attach: $value/final-logcat-filtered.txt"
+    return
+  fi
+  if grep -Eqi 'FATAL EXCEPTION|WireGuard attach failed|CreateTUNFromFile failed|IpcSet failed' "$value/final-logcat-filtered.txt"; then
+    external_blocker "ANDROID_PHYSICAL_SMOKE_EVIDENCE final-logcat-filtered.txt contains fatal/error marker: $value/final-logcat-filtered.txt"
+    return
+  fi
   pass "ANDROID_PHYSICAL_SMOKE_EVIDENCE passed physical-device summary: $value"
 }
 
