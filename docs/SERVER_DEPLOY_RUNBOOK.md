@@ -243,7 +243,11 @@ production.
 Rollback restores the latest backup and restarts the service.
 
 ```bash
-MODE=rollback SSH_USER=root HOST=142.252.220.91 scripts/deploy-server-vps.sh
+CONFIRM_PRODUCTION_ROLLBACK=142.252.220.91:56004 \
+  MODE=rollback \
+  SSH_USER=root \
+  HOST=142.252.220.91 \
+  scripts/deploy-server-vps.sh
 ```
 
 After rollback, verify:
@@ -256,6 +260,7 @@ ssh root@142.252.220.91 'systemctl status vk-turn-proxy-ios.service --no-pager'
 
 - Do not promote before a second-port client test.
 - `MODE=promote` intentionally requires `CONFIRM_PRODUCTION_PROMOTE=142.252.220.91:56004`.
+- `MODE=rollback` intentionally requires `CONFIRM_PRODUCTION_ROLLBACK=142.252.220.91:56004`.
 - Do not edit `/etc/vk-turn-proxy-ios.env` from scripts except creating it from the example when absent.
 - Keep `VKTURN_CONNECT=127.0.0.1:51820` unless the WireGuard backend changes.
 - Keep health/admin bind on localhost.

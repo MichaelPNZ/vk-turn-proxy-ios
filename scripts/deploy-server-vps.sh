@@ -18,6 +18,7 @@ DRY_LISTEN="${DRY_LISTEN:-127.0.0.1:56014}"
 DRY_HEALTH="${DRY_HEALTH:-127.0.0.1:56085}"
 DRY_CONNECT="${DRY_CONNECT:-127.0.0.1:51820}"
 CONFIRM_PRODUCTION_PROMOTE="${CONFIRM_PRODUCTION_PROMOTE:-}"
+CONFIRM_PRODUCTION_ROLLBACK="${CONFIRM_PRODUCTION_ROLLBACK:-}"
 
 usage() {
   cat >&2 <<EOF
@@ -34,6 +35,7 @@ Environment:
   DRY_HEALTH=$DRY_HEALTH
   DRY_CONNECT=$DRY_CONNECT
   CONFIRM_PRODUCTION_PROMOTE=$CONFIRM_PRODUCTION_PROMOTE
+  CONFIRM_PRODUCTION_ROLLBACK=$CONFIRM_PRODUCTION_ROLLBACK
 
 Modes:
   dry-run        Uploads package and runs the new binary on localhost-only ports.
@@ -41,7 +43,8 @@ Modes:
   promote        Requires CONFIRM_PRODUCTION_PROMOTE=$HOST:56004, backs up current production files,
                  installs staged binary/unit/logrotate, restarts service, checks health,
                  and automatically rolls back if post-promote health fails.
-  rollback       Restores the latest backup made by promote and restarts service.
+  rollback       Requires CONFIRM_PRODUCTION_ROLLBACK=$HOST:56004, restores the latest backup
+                 made by promote, and restarts service.
 EOF
 }
 
@@ -59,6 +62,18 @@ Required:
   CONFIRM_PRODUCTION_PROMOTE=$HOST:56004 MODE=promote SSH_USER=$SSH_USER HOST=$HOST $0
 
 Run a public second-port client smoke before promoting production 56004.
+EOF
+  exit 64
+fi
+
+if [[ "$MODE" == "rollback" && "$CONFIRM_PRODUCTION_ROLLBACK" != "$HOST:56004" ]]; then
+  cat >&2 <<EOF
+ERROR: refusing production rollback without explicit confirmation.
+
+Required:
+  CONFIRM_PRODUCTION_ROLLBACK=$HOST:56004 MODE=rollback SSH_USER=$SSH_USER HOST=$HOST $0
+
+Rollback restores the latest production backup and restarts $SERVICE_NAME.
 EOF
   exit 64
 fi
