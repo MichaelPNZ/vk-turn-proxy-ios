@@ -15,6 +15,10 @@ grep -q 'windows-service-commands' "$SCRIPT"
 grep -q '"-mode" "validate" "-request"' "$SCRIPT"
 grep -q 'serviceValidateOk = \$true' "$SCRIPT"
 grep -q 'desktopPreflightOk = \$true' "$SCRIPT"
+grep -q 'certutil.exe' "$ROOT_DIR/scripts/build-windows-service.sh"
+grep -q 'sha256sum' "$ROOT_DIR/scripts/build-windows-service.sh"
+grep -q 'certutil.exe' "$ROOT_DIR/scripts/package-windows-runtime.sh"
+grep -q 'sha256sum' "$ROOT_DIR/scripts/package-windows-runtime.sh"
 
 if grep -q 'evidenceType = "windows_runtime_smoke"' "$SCRIPT"; then
   echo "Package CI smoke must not claim final windows_runtime_smoke evidence." >&2
