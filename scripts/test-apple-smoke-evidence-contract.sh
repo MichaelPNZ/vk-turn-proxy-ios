@@ -57,9 +57,10 @@ OUT_DIR="$TMP_DIR/status-valid" \
 RUN_GITHUB=0 \
 RUN_APPLE_SIGNING=0 \
 RUN_SERVER_BASELINE=0 \
+    RUN_SERVER_STAGING=0 \
 IPHONE_TESTFLIGHT_SMOKE_EVIDENCE="$valid_iphone" \
 MACOS_TESTFLIGHT_SMOKE_EVIDENCE="$valid_macos" \
-"$ROOT_DIR/scripts/release-blockers-status.sh" v1.0-build160 > "$TMP_DIR/valid.out"
+"$ROOT_DIR/scripts/release-blockers-status.sh" v1.0-build161 > "$TMP_DIR/valid.out"
 
 grep -q $'^apple\tskipped\tRUN_APPLE_SIGNING=0$' "$TMP_DIR/status-valid/status.tsv"
 grep -q $'^apple\tready\tiphone_testflight_smoke=' "$TMP_DIR/status-valid/status.tsv"
@@ -69,9 +70,10 @@ OUT_DIR="$TMP_DIR/status-weak" \
 RUN_GITHUB=0 \
 RUN_APPLE_SIGNING=0 \
 RUN_SERVER_BASELINE=0 \
+    RUN_SERVER_STAGING=0 \
 IPHONE_TESTFLIGHT_SMOKE_EVIDENCE="$weak_iphone" \
 MACOS_TESTFLIGHT_SMOKE_EVIDENCE="$weak_macos" \
-"$ROOT_DIR/scripts/release-blockers-status.sh" v1.0-build160 > "$TMP_DIR/weak.out"
+"$ROOT_DIR/scripts/release-blockers-status.sh" v1.0-build161 > "$TMP_DIR/weak.out"
 
 grep -q $'^apple\tblocked\tIPHONE_TESTFLIGHT_SMOKE_EVIDENCE_missing_or_contract_failed$' "$TMP_DIR/status-weak/status.tsv"
 grep -q $'^apple\tblocked\tMACOS_TESTFLIGHT_SMOKE_EVIDENCE_missing_or_contract_failed$' "$TMP_DIR/status-weak/status.tsv"

@@ -8,7 +8,7 @@ RUN_VPS_DRY_RUN="${RUN_VPS_DRY_RUN:-0}"
 RUN_ANDROID_RELEASE_SMOKE="${RUN_ANDROID_RELEASE_SMOKE:-0}"
 HOST="${HOST:-142.252.220.91}"
 SSH_USER="${SSH_USER:-root}"
-TAG="${TAG:-v1.0-build160}"
+TAG="${TAG:-v1.0-build161}"
 
 banner() {
   printf '\n==> %s\n' "$*"
@@ -44,6 +44,7 @@ check_shell_syntax \
   scripts/collect-apple-smoke-evidence.sh \
   scripts/configure-github-testflight-secrets.sh \
   scripts/collect-server-production-evidence.sh \
+  scripts/collect-server-staging-evidence.sh \
   scripts/collect-server-public-smoke-evidence.sh \
   scripts/diagnose-apple-signing.sh \
   scripts/build-windows-service.sh \

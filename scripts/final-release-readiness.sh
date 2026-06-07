@@ -516,6 +516,7 @@ check_shell_syntax \
   scripts/collect-apple-smoke-evidence.sh \
   scripts/configure-github-testflight-secrets.sh \
   scripts/collect-server-production-evidence.sh \
+  scripts/collect-server-staging-evidence.sh \
   scripts/collect-server-public-smoke-evidence.sh \
   scripts/diagnose-apple-signing.sh \
   scripts/install-apple-signing-assets.sh \

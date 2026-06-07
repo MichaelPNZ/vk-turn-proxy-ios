@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TAG="${TAG:-v1.0-build160}"
+TAG="${TAG:-v1.0-build161}"
 OUT_DIR="$(mktemp -d "$ROOT_DIR/build/test-external-smoke-kit-$TAG.XXXXXX")"
 MANIFEST="$ROOT_DIR/build/release/$TAG-cross-platform-sha256.txt"
 created_manifest=0

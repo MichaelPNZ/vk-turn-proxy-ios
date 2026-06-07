@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TAG="${TAG:-v1.0-build160}"
+TAG="${TAG:-v1.0-build161}"
 TMP_DIR="$(mktemp -d "$ROOT_DIR/build/test-windows-installer-evidence.XXXXXX")"
 INSTALLER_SHA256="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
@@ -47,6 +47,7 @@ run_status() {
     RUN_GITHUB=0 \
     RUN_APPLE_SIGNING=0 \
     RUN_SERVER_BASELINE=0 \
+    RUN_SERVER_STAGING=0 \
     "$ROOT_DIR/scripts/release-blockers-status.sh" "$TAG" > "$out_dir.log"
 }
 

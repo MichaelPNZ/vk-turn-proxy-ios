@@ -2,12 +2,13 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TAG="${1:-v1.0-build160}"
+TAG="${1:-v1.0-build161}"
 ANDROID_HOME="${ANDROID_HOME:-"$HOME/Library/Android/sdk"}"
 HOST="${HOST:-142.252.220.91}"
 SSH_USER="${SSH_USER:-root}"
 RUN_APPLE_SIGNING="${RUN_APPLE_SIGNING:-1}"
 RUN_SERVER_BASELINE="${RUN_SERVER_BASELINE:-1}"
+RUN_SERVER_STAGING="${RUN_SERVER_STAGING:-1}"
 RUN_GITHUB="${RUN_GITHUB:-1}"
 OUT_DIR="${OUT_DIR:-"$ROOT_DIR/build/release-status/$TAG"}"
 
@@ -28,6 +29,7 @@ Environment:
   RUN_GITHUB=1|0          default: 1, reads GitHub Actions state via gh
   RUN_APPLE_SIGNING=1|0   default: 1, runs read-only Apple signing collector
   RUN_SERVER_BASELINE=1|0 default: 1, runs read-only production baseline collector
+  RUN_SERVER_STAGING=1|0  default: 1, runs read-only server staging collector
   HOST=142.252.220.91
   SSH_USER=root
 
@@ -390,6 +392,19 @@ check_server() {
     write_status server info "baseline service=$service listener_56004=$listener healthz=$health readyz=$readyz evidence=$evidence"
   else
     write_status server blocked "server_baseline_collector_failed output=$OUT_DIR/server-baseline-command.txt"
+  fi
+
+  if [[ "$RUN_SERVER_STAGING" != "1" ]]; then
+    write_status server skipped "RUN_SERVER_STAGING=0"
+    return
+  fi
+  local staging_evidence="$OUT_DIR/server-staging"
+  if HOST="$HOST" SSH_USER="$SSH_USER" scripts/collect-server-staging-evidence.sh "$staging_evidence" > "$OUT_DIR/server-staging-command.txt" 2>&1; then
+    local staged_sha
+    staged_sha="$(summary_value "$staging_evidence/summary.txt" staged_binary_sha256)"
+    write_status server ready "staging_ready sha256=$staged_sha evidence=$staging_evidence"
+  else
+    write_status server blocked "server_staging_not_ready output=$OUT_DIR/server-staging-command.txt"
   fi
 }
 

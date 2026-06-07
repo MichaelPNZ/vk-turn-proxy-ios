@@ -136,7 +136,7 @@ The server binary also has a built-in concurrent-session guard:
 -max-sessions 1024
 ```
 
-This flag defaults to `1024`. Keep the default unless production metrics show real pressure; setting it to `0` disables the guard. The packaged systemd unit currently relies on the binary default so existing production env files do not need an immediate edit.
+This flag defaults to `1024`. Keep the default unless production metrics show real pressure; setting it to `0` disables the guard. The packaged systemd unit sets `Environment=VKTURN_MAX_SESSIONS=1024` as a fallback and passes `-max-sessions ${VKTURN_MAX_SESSIONS}`, so existing production env files do not need an immediate edit.
 
 Last Android client verification on public second port on 2026-06-06:
 
@@ -191,6 +191,29 @@ Fresh read-only production baseline on 2026-06-07:
 - result: `summary.txt` has `result=passed`, `evidence_type=server_production_baseline`, and `attachment_count=10`;
 - status fields: `service=active`, `listener_56004=present`, `listener_56080=missing`, `healthz=missing`, `readyz=missing`, `metrics=missing`;
 - production service remains the legacy running service without admin health on `127.0.0.1:56080`.
+
+## Staging Evidence
+
+After `MODE=install-staged`, collect read-only evidence that the next binary and
+service files are actually staged on the VPS:
+
+```bash
+HOST=142.252.220.91 \
+SSH_USER=root \
+scripts/collect-server-staging-evidence.sh \
+  build/evidence/server-staging-<date>
+```
+
+Expected:
+
+- `/usr/local/bin/vk-turn-proxy-server.next` exists and is executable;
+- `/tmp/vk-turn-proxy-ios.service.next` exists and includes
+  `Environment=VKTURN_MAX_SESSIONS=1024` plus
+  `-max-sessions ${VKTURN_MAX_SESSIONS}`;
+- `/tmp/vk-turn-proxy-ios.logrotate.next` exists;
+- `/etc/vk-turn-proxy-ios.env` exists;
+- current production service is still `active` and UDP `:56004` is still
+  present before promote.
 
 ## Promote
 

@@ -342,4 +342,4 @@ else
   printf 'GitHub TestFlight secrets configured for repo: %s\n' "$REPO"
 fi
 printf 'Next check:\n'
-printf '  scripts/release-blockers-status.sh v1.0-build160\n'
+printf '  scripts/release-blockers-status.sh v1.0-build161\n'

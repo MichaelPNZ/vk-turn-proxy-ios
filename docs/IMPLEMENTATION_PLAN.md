@@ -167,7 +167,8 @@ Current verification:
   `vk_turn_proxy_*` metrics, and a non-empty production client smoke log.
 - `scripts/final-release-readiness.sh <tag>` requires production-port smoke evidence before final release readiness can pass.
 - `scripts/prepare-external-smoke-kit.sh <tag>` creates a no-secrets handoff kit under `build/external-smoke-kit/<tag>/` with the guarded TestFlight secrets dry-run/write wrapper, external smoke commands/templates, and final readiness env placeholders.
-- `scripts/release-blockers-status.sh <tag>` produces a read-only readiness snapshot under `build/release-status/<tag>/` with current GitHub CI/artifact, TestFlight workflow/secrets, Android physical-device, Apple signing/TestFlight, Windows, and production-server blocker status.
+- `scripts/collect-server-staging-evidence.sh <dir>` verifies the staged VPS binary/unit/logrotate/env files before any production promote.
+- `scripts/release-blockers-status.sh <tag>` produces a read-only readiness snapshot under `build/release-status/<tag>/` with current GitHub CI/artifact, TestFlight workflow/secrets, Android physical-device, Apple signing/TestFlight, Windows, production-server blocker status, and staged VPS readiness.
 
 Remaining:
 
@@ -499,7 +500,7 @@ Remaining:
 4. Install/create an `Apple Distribution` signing identity and remove the revoked development identity from keychain.
 5. Prepare `VKTurnProxy/AppStoreConnect.env` with `scripts/configure-testflight-env.sh` and run `scripts/preflight-testflight.sh`.
 6. Re-run `scripts/local-readiness-gate.sh` after external signing setup.
-7. Run `scripts/release-blockers-status.sh v1.0-build160` to confirm the remaining external blockers before final smoke collection.
+7. Run `scripts/release-blockers-status.sh v1.0-build161` to confirm the remaining external blockers before final smoke collection.
 8. Run the external smokes and save evidence paths for Android physical, iPhone TestFlight, signed macOS Packet Tunnel, Windows runtime, Windows installer, and production server/client smoke.
 9. Run `scripts/final-release-readiness.sh <tag>` with the evidence environment variables set.
 10. Run `./release.sh <tag> all` after final readiness passes; it uploads iOS/macOS to TestFlight and attaches Android APK/AAB, Windows runtime zip, optional Windows setup EXE, Linux server package, cross-platform checksum manifest, and full release checksum manifest to GitHub Release.
