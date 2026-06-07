@@ -137,6 +137,22 @@ scripts/configure-github-testflight-secrets.sh \
   --appstore-key-p8 /absolute/path/AuthKey_ABCDE12345.p8
 ```
 
+If `VKTurnProxy/AppStoreConnect.env` already exists and the distribution
+provisioning profiles are installed locally, use the shorter path:
+
+```bash
+scripts/configure-github-testflight-secrets.sh \
+  --cert-p12 /absolute/path/AppleDistribution.p12 \
+  --cert-password '<p12 password>' \
+  --profiles-from-installed \
+  --appstore-env VKTurnProxy/AppStoreConnect.env
+```
+
+`--appstore-env` reads `APPSTORE_KEY_ID`, `APPSTORE_ISSUER_ID`, and
+`APPSTORE_KEY_PATH`. `--profiles-from-installed` scans
+`~/Library/MobileDevice/Provisioning Profiles` and selects App Store
+distribution profiles that match every bundle id in `VKTurnProxy/project.yml`.
+
 The script validates the `.p8`, `.p12` password, provisioning profile decode,
 bundle-id coverage, and App Store distribution profile type before writing any
 GitHub secrets.

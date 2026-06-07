@@ -8,6 +8,7 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 cert="$TMP_DIR/cert.p12"
 key="$TMP_DIR/AuthKey_ABCDE12345.p8"
 profile="$TMP_DIR/profile.mobileprovision"
+appstore_env="$TMP_DIR/AppStoreConnect.env"
 touch "$cert" "$key" "$profile"
 
 if DRY_RUN=1 "$ROOT_DIR/scripts/configure-github-testflight-secrets.sh" \
@@ -41,6 +42,25 @@ if DRY_RUN=1 "$ROOT_DIR/scripts/configure-github-testflight-secrets.sh" \
 fi
 grep -q 'does not look like a private key' "$TMP_DIR/bad-p8.out"
 
+cat > "$appstore_env" <<EOF
+APPSTORE_KEY_ID=ABCDE12345
+APPSTORE_ISSUER_ID=00000000-0000-0000-0000-000000000000
+APPSTORE_KEY_PATH=$key
+EOF
+printf 'not a private key\n' > "$key"
+if DRY_RUN=1 "$ROOT_DIR/scripts/configure-github-testflight-secrets.sh" \
+  --cert-p12 "$cert" \
+  --cert-password password \
+  --profile "$profile" \
+  --profile "$profile" \
+  --profile "$profile" \
+  --profile "$profile" \
+  --appstore-env "$appstore_env" > "$TMP_DIR/env-bad-p8.out" 2>&1; then
+  echo "Invalid .p8 loaded from AppStoreConnect.env must fail before GitHub secrets are written." >&2
+  exit 1
+fi
+grep -q 'does not look like a private key' "$TMP_DIR/env-bad-p8.out"
+
 cat > "$key" <<'EOF'
 -----BEGIN PRIVATE KEY-----
 fixture
@@ -53,9 +73,7 @@ if DRY_RUN=1 "$ROOT_DIR/scripts/configure-github-testflight-secrets.sh" \
   --profile "$profile" \
   --profile "$profile" \
   --profile "$profile" \
-  --appstore-key-id ABCDE12345 \
-  --appstore-issuer-id 00000000-0000-0000-0000-000000000000 \
-  --appstore-key-p8 "$key" > "$TMP_DIR/bad-p12.out" 2>&1; then
+  --appstore-env "$appstore_env" > "$TMP_DIR/bad-p12.out" 2>&1; then
   echo "Invalid .p12 must fail before GitHub secrets are written." >&2
   exit 1
 fi

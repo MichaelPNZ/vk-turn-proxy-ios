@@ -7,6 +7,8 @@ PROJECT_YML="$ROOT_DIR/VKTurnProxy/project.yml"
 CERT_P12=""
 CERT_PASSWORD=""
 PROFILES=()
+APPSTORE_ENV=""
+PROFILE_SCAN_DIR=""
 APPSTORE_KEY_ID=""
 APPSTORE_ISSUER_ID=""
 APPSTORE_KEY_P8=""
@@ -26,6 +28,12 @@ Usage:
     --appstore-issuer-id 00000000-0000-0000-0000-000000000000 \
     --appstore-key-p8 /absolute/path/AuthKey_ABCDE12345.p8
 
+  scripts/configure-github-testflight-secrets.sh \
+    --cert-p12 /absolute/path/AppleDistribution.p12 \
+    --cert-password '<p12 password>' \
+    --profiles-from-installed \
+    --appstore-env VKTurnProxy/AppStoreConnect.env
+
 Environment:
   REPO=owner/name       default: MichaelPNZ/vk-turn-proxy-ios
   DRY_RUN=1            validate inputs and print secret names without writing
@@ -43,6 +51,12 @@ while [[ $# -gt 0 ]]; do
       CERT_PASSWORD="${2:-}"; shift 2 ;;
     --profile)
       PROFILES+=("${2:-}"); shift 2 ;;
+    --profiles-from-dir)
+      PROFILE_SCAN_DIR="${2:-}"; shift 2 ;;
+    --profiles-from-installed)
+      PROFILE_SCAN_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"; shift ;;
+    --appstore-env)
+      APPSTORE_ENV="${2:-}"; shift 2 ;;
     --appstore-key-id)
       APPSTORE_KEY_ID="${2:-}"; shift 2 ;;
     --appstore-issuer-id)
@@ -103,6 +117,77 @@ profile_matches_bundle() {
   local app_id
   app_id="$(profile_app_id "$plist")"
   [[ "$app_id" == "$TEAM_ID.$bundle_id" || "$app_id" == "$TEAM_ID.*" || "$app_id" == *".$bundle_id" ]]
+}
+
+load_appstore_env() {
+  [[ -n "$APPSTORE_ENV" ]] || return 0
+  require_file "$APPSTORE_ENV" "App Store Connect env"
+
+  local explicit_key_id="$APPSTORE_KEY_ID"
+  local explicit_issuer_id="$APPSTORE_ISSUER_ID"
+  local explicit_key_p8="$APPSTORE_KEY_P8"
+
+  # shellcheck disable=SC1090
+  source "$APPSTORE_ENV"
+
+  if [[ -n "$explicit_key_id" ]]; then
+    APPSTORE_KEY_ID="$explicit_key_id"
+  fi
+  if [[ -n "$explicit_issuer_id" ]]; then
+    APPSTORE_ISSUER_ID="$explicit_issuer_id"
+  fi
+  if [[ -n "$explicit_key_p8" ]]; then
+    APPSTORE_KEY_P8="$explicit_key_p8"
+  elif [[ -n "${APPSTORE_KEY_PATH:-}" ]]; then
+    APPSTORE_KEY_P8="$APPSTORE_KEY_PATH"
+  fi
+}
+
+select_profiles_from_dir() {
+  [[ -n "$PROFILE_SCAN_DIR" ]] || return 0
+  [[ "${#PROFILES[@]}" -eq 0 ]] || return 0
+  [[ -d "$PROFILE_SCAN_DIR" ]] || fail "provisioning profile scan directory does not exist: $PROFILE_SCAN_DIR"
+  [[ -f "$PROJECT_YML" ]] || fail "project.yml is missing: $PROJECT_YML"
+
+  TEAM_ID="$(awk '/DEVELOPMENT_TEAM:/ {print $NF; exit}' "$PROJECT_YML" 2>/dev/null || true)"
+  [[ -n "$TEAM_ID" ]] || fail "DEVELOPMENT_TEAM is missing in $PROJECT_YML"
+
+  local profile_list="$tmp_dir/profile-scan-list.txt"
+  find "$PROFILE_SCAN_DIR" -maxdepth 1 -type f \( -name '*.mobileprovision' -o -name '*.provisionprofile' \) | sort > "$profile_list"
+  [[ -s "$profile_list" ]] || fail "no provisioning profiles found in: $PROFILE_SCAN_DIR"
+
+  local selected="$tmp_dir/selected-profiles.txt"
+  : > "$selected"
+  local bundle_id matched profile decoded get_task_allow
+  while IFS= read -r bundle_id; do
+    [[ -n "$bundle_id" ]] || continue
+    matched=0
+    while IFS= read -r profile; do
+      [[ -f "$profile" ]] || continue
+      decoded="$tmp_dir/profile-scan-$(basename "$profile").plist"
+      if ! security cms -D -i "$profile" > "$decoded" 2>/dev/null; then
+        continue
+      fi
+      if ! profile_matches_bundle "$decoded" "$bundle_id"; then
+        continue
+      fi
+      get_task_allow="$(profile_get_task_allow "$decoded")"
+      if [[ "$get_task_allow" != "false" ]]; then
+        continue
+      fi
+      matched=1
+      printf '%s\n' "$profile" >> "$selected"
+    done < "$profile_list"
+    if [[ "$matched" != 1 ]]; then
+      fail "no App Store distribution provisioning profile found for $bundle_id in $PROFILE_SCAN_DIR"
+    fi
+  done < <(bundle_ids)
+
+  PROFILES=()
+  while IFS= read -r profile; do
+    PROFILES+=("$profile")
+  done < <(sort -u "$selected")
+  printf 'auto_selected_profiles=%s from %s\n' "${#PROFILES[@]}" "$PROFILE_SCAN_DIR" >&2
 }
 
 validate_appstore_key() {
@@ -208,15 +293,18 @@ if [[ "$DRY_RUN" != "1" ]]; then
   gh auth status >/dev/null 2>&1 || fail "gh is not authenticated"
 fi
 
+tmp_dir="$(mktemp -d)"
+trap 'rm -rf "$tmp_dir"' EXIT
+
+load_appstore_env
+select_profiles_from_dir
+
 require_file "$CERT_P12" "Apple Distribution .p12"
 require_file "$APPSTORE_KEY_P8" "App Store Connect .p8"
 [[ -n "$CERT_PASSWORD" ]] || fail "--cert-password is required"
 [[ "$APPSTORE_KEY_ID" =~ ^[A-Z0-9]{10}$ ]] || fail "--appstore-key-id must be a 10-character key id"
 [[ "$APPSTORE_ISSUER_ID" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]] || fail "--appstore-issuer-id must be a UUID"
 [[ "${#PROFILES[@]}" -ge 4 ]] || fail "at least four --profile files are required"
-
-tmp_dir="$(mktemp -d)"
-trap 'rm -rf "$tmp_dir"' EXIT
 
 for profile in "${PROFILES[@]}"; do
   require_file "$profile" "provisioning profile"
