@@ -89,6 +89,12 @@ require_file_in_dir() {
   return 0
 }
 
+summary_txt_value() {
+  local file="$1"
+  local key="$2"
+  awk -F= -v key="$key" '$1 == key {value=$2} END {print value}' "$file" 2>/dev/null || true
+}
+
 require_summary_txt_evidence() {
   local env_name="$1"
   local evidence_type="$2"
@@ -244,6 +250,89 @@ require_android_physical_evidence() {
   pass "ANDROID_PHYSICAL_SMOKE_EVIDENCE passed physical-device summary: $value"
 }
 
+require_server_production_evidence() {
+  local value="${SERVER_PRODUCTION_SMOKE_EVIDENCE:-}"
+  if [[ -z "$value" ]]; then
+    external_blocker "SERVER_PRODUCTION_SMOKE_EVIDENCE is not set (production-port server/client smoke after promote)"
+    return
+  fi
+  if [[ ! -d "$value" ]]; then
+    external_blocker "SERVER_PRODUCTION_SMOKE_EVIDENCE must be an evidence directory: $value"
+    return
+  fi
+  local summary="$value/summary.txt"
+  if [[ ! -f "$summary" ]]; then
+    external_blocker "SERVER_PRODUCTION_SMOKE_EVIDENCE missing summary.txt: $summary"
+    return
+  fi
+  if ! grep -q '^result=passed$' "$summary"; then
+    external_blocker "SERVER_PRODUCTION_SMOKE_EVIDENCE summary does not contain result=passed: $summary"
+    return
+  fi
+  if ! grep -q '^evidence_type=server_production_smoke$' "$summary"; then
+    external_blocker "SERVER_PRODUCTION_SMOKE_EVIDENCE summary does not contain evidence_type=server_production_smoke: $summary"
+    return
+  fi
+  local attachment_count
+  attachment_count="$(summary_txt_value "$summary" attachment_count)"
+  if [[ ! "$attachment_count" =~ ^[1-9][0-9]*$ ]]; then
+    external_blocker "SERVER_PRODUCTION_SMOKE_EVIDENCE summary must contain attachment_count > 0: $summary"
+    return
+  fi
+  local key expected actual
+  for key in service listener_56004 listener_56080 healthz readyz metrics production_client_smoke_log; do
+    case "$key" in
+      service) expected="active" ;;
+      listener_56004|listener_56080|metrics|production_client_smoke_log) expected="present" ;;
+      healthz) expected="ok" ;;
+      readyz) expected="ready" ;;
+    esac
+    actual="$(summary_txt_value "$summary" "$key")"
+    if [[ "$actual" != "$expected" ]]; then
+      external_blocker "SERVER_PRODUCTION_SMOKE_EVIDENCE summary must contain $key=$expected: $summary"
+      return
+    fi
+  done
+  require_file_in_dir SERVER_PRODUCTION_SMOKE_EVIDENCE "$value" "systemctl-is-active.txt" || return
+  require_file_in_dir SERVER_PRODUCTION_SMOKE_EVIDENCE "$value" "listeners.txt" || return
+  require_file_in_dir SERVER_PRODUCTION_SMOKE_EVIDENCE "$value" "healthz.txt" || return
+  require_file_in_dir SERVER_PRODUCTION_SMOKE_EVIDENCE "$value" "readyz.txt" || return
+  require_file_in_dir SERVER_PRODUCTION_SMOKE_EVIDENCE "$value" "metrics-head.txt" || return
+  require_file_in_dir SERVER_PRODUCTION_SMOKE_EVIDENCE "$value" "production-sha256.txt" || return
+  require_file_in_dir SERVER_PRODUCTION_SMOKE_EVIDENCE "$value" "server-status.txt" || return
+  require_file_in_dir SERVER_PRODUCTION_SMOKE_EVIDENCE "$value" "server-log-tail.txt" || return
+  require_file_in_dir SERVER_PRODUCTION_SMOKE_EVIDENCE "$value" "client-smoke.log" || return
+  if ! grep -q '^active$' "$value/systemctl-is-active.txt"; then
+    external_blocker "SERVER_PRODUCTION_SMOKE_EVIDENCE systemctl-is-active.txt does not contain active"
+    return
+  fi
+  if ! grep -q ':56004' "$value/listeners.txt"; then
+    external_blocker "SERVER_PRODUCTION_SMOKE_EVIDENCE listeners.txt does not contain :56004"
+    return
+  fi
+  if ! grep -q ':56080' "$value/listeners.txt"; then
+    external_blocker "SERVER_PRODUCTION_SMOKE_EVIDENCE listeners.txt does not contain :56080 admin listener"
+    return
+  fi
+  if ! grep -q '^ok$' "$value/healthz.txt"; then
+    external_blocker "SERVER_PRODUCTION_SMOKE_EVIDENCE healthz.txt does not contain ok"
+    return
+  fi
+  if ! grep -q '^ready$' "$value/readyz.txt"; then
+    external_blocker "SERVER_PRODUCTION_SMOKE_EVIDENCE readyz.txt does not contain ready"
+    return
+  fi
+  if ! grep -q '^vk_turn_proxy_' "$value/metrics-head.txt"; then
+    external_blocker "SERVER_PRODUCTION_SMOKE_EVIDENCE metrics-head.txt does not contain vk_turn_proxy metrics"
+    return
+  fi
+  if [[ ! -s "$value/client-smoke.log" ]]; then
+    external_blocker "SERVER_PRODUCTION_SMOKE_EVIDENCE client-smoke.log must be non-empty"
+    return
+  fi
+  pass "SERVER_PRODUCTION_SMOKE_EVIDENCE passed production smoke contract: $value"
+}
+
 require_manifest() {
   local manifest="$ROOT_DIR/build/release/$TAG-cross-platform-sha256.txt"
   if [[ ! -f "$manifest" ]]; then
@@ -292,6 +381,7 @@ check_shell_syntax \
   scripts/test-server-deploy-safety.sh \
   scripts/test-android-physical-evidence-contract.sh \
   scripts/test-windows-runtime-evidence-contract.sh \
+  scripts/test-server-production-evidence-contract.sh \
   scripts/test-external-smoke-kit.sh \
   scripts/test-windows-installer-packaging.sh \
   scripts/preflight-android-release.sh \
@@ -307,6 +397,7 @@ run_required "release manifest format test" scripts/test-release-manifest-format
 run_required "server deploy safety test" scripts/test-server-deploy-safety.sh
 run_required "android physical evidence contract test" scripts/test-android-physical-evidence-contract.sh
 run_required "windows runtime evidence contract test" scripts/test-windows-runtime-evidence-contract.sh
+run_required "server production evidence contract test" scripts/test-server-production-evidence-contract.sh
 run_required "external smoke kit test" scripts/test-external-smoke-kit.sh
 run_required "windows installer packaging test" scripts/test-windows-installer-packaging.sh
 
@@ -339,7 +430,7 @@ require_summary_txt_evidence IPHONE_TESTFLIGHT_SMOKE_EVIDENCE iphone_testflight_
 require_summary_txt_evidence MACOS_TESTFLIGHT_SMOKE_EVIDENCE macos_testflight_packet_tunnel "signed macOS Packet Tunnel smoke"
 require_windows_runtime_evidence
 require_summary_txt_evidence WINDOWS_INSTALLER_SMOKE_EVIDENCE windows_installer_smoke "Windows EXE build/sign/install smoke"
-require_summary_txt_evidence SERVER_PRODUCTION_SMOKE_EVIDENCE server_production_smoke "production-port server/client smoke after promote"
+require_server_production_evidence
 
 printf '\nFinal readiness summary: %d failure(s), %d warning(s)\n' "$failures" "$warnings"
 if (( failures > 0 )); then

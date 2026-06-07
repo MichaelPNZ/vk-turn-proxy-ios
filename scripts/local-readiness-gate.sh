@@ -58,6 +58,7 @@ check_shell_syntax \
   scripts/test-server-deploy-safety.sh \
   scripts/test-android-physical-evidence-contract.sh \
   scripts/test-windows-runtime-evidence-contract.sh \
+  scripts/test-server-production-evidence-contract.sh \
   scripts/test-external-smoke-kit.sh \
   scripts/test-windows-installer-packaging.sh \
   scripts/preflight-android-release.sh \
@@ -73,6 +74,7 @@ run scripts/test-release-manifest-format.sh
 run scripts/test-server-deploy-safety.sh
 run scripts/test-android-physical-evidence-contract.sh
 run scripts/test-windows-runtime-evidence-contract.sh
+run scripts/test-server-production-evidence-contract.sh
 run env TAG="$TAG" scripts/test-external-smoke-kit.sh
 run scripts/test-windows-installer-packaging.sh
 run go test ./...

@@ -162,6 +162,9 @@ Current verification:
 - `scripts/test-server-deploy-safety.sh` verifies the production promote and dry-run guards locally.
 - Server startup now fails fast if the admin health listener cannot bind, so a
   promoted process cannot silently run without `/healthz` and `/readyz`.
+- Final server production evidence now requires active systemd, production UDP
+  `:56004`, admin TCP `:56080`, `healthz=ok`, `readyz=ready`, exported
+  `vk_turn_proxy_*` metrics, and a non-empty production client smoke log.
 - `scripts/final-release-readiness.sh <tag>` requires production-port smoke evidence before final release readiness can pass.
 - `scripts/prepare-external-smoke-kit.sh <tag>` creates a no-secrets handoff kit under `build/external-smoke-kit/<tag>/` with external smoke commands/templates and final readiness env placeholders.
 - `scripts/release-blockers-status.sh <tag>` produces a read-only readiness snapshot under `build/release-status/<tag>/` with current GitHub CI/artifact, TestFlight workflow/secrets, Android physical-device, Apple signing/TestFlight, Windows, and production-server blocker status.

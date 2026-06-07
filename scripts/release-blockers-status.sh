@@ -103,6 +103,37 @@ has_windows_runtime_smoke_passed() {
   grep -q '"state"[[:space:]]*:[[:space:]]*"stopped"' "$dir/status-stopped.json" || return 1
 }
 
+has_server_production_smoke_passed() {
+  local dir="$1"
+  local summary="$dir/summary.txt"
+  [[ -f "$summary" ]] || return 1
+  grep -q '^result=passed$' "$summary" || return 1
+  grep -q '^evidence_type=server_production_smoke$' "$summary" || return 1
+  [[ "$(summary_value "$summary" attachment_count)" =~ ^[1-9][0-9]*$ ]] || return 1
+  [[ "$(summary_value "$summary" service)" == "active" ]] || return 1
+  [[ "$(summary_value "$summary" listener_56004)" == "present" ]] || return 1
+  [[ "$(summary_value "$summary" listener_56080)" == "present" ]] || return 1
+  [[ "$(summary_value "$summary" healthz)" == "ok" ]] || return 1
+  [[ "$(summary_value "$summary" readyz)" == "ready" ]] || return 1
+  [[ "$(summary_value "$summary" metrics)" == "present" ]] || return 1
+  [[ "$(summary_value "$summary" production_client_smoke_log)" == "present" ]] || return 1
+  [[ -f "$dir/systemctl-is-active.txt" ]] || return 1
+  [[ -f "$dir/listeners.txt" ]] || return 1
+  [[ -f "$dir/healthz.txt" ]] || return 1
+  [[ -f "$dir/readyz.txt" ]] || return 1
+  [[ -f "$dir/metrics-head.txt" ]] || return 1
+  [[ -f "$dir/production-sha256.txt" ]] || return 1
+  [[ -f "$dir/server-status.txt" ]] || return 1
+  [[ -f "$dir/server-log-tail.txt" ]] || return 1
+  [[ -s "$dir/client-smoke.log" ]] || return 1
+  grep -q '^active$' "$dir/systemctl-is-active.txt" || return 1
+  grep -q ':56004' "$dir/listeners.txt" || return 1
+  grep -q ':56080' "$dir/listeners.txt" || return 1
+  grep -q '^ok$' "$dir/healthz.txt" || return 1
+  grep -q '^ready$' "$dir/readyz.txt" || return 1
+  grep -q '^vk_turn_proxy_' "$dir/metrics-head.txt" || return 1
+}
+
 check_git() {
   local head
   head="$(git -C "$ROOT_DIR" rev-parse --short HEAD)"
@@ -284,12 +315,12 @@ check_windows() {
 
 check_server() {
   if [[ -n "${SERVER_PRODUCTION_SMOKE_EVIDENCE:-}" ]] &&
-    has_summary_type_passed "$SERVER_PRODUCTION_SMOKE_EVIDENCE" server_production_smoke; then
+    has_server_production_smoke_passed "$SERVER_PRODUCTION_SMOKE_EVIDENCE"; then
     write_status server ready "production_smoke=$SERVER_PRODUCTION_SMOKE_EVIDENCE"
     return
   fi
 
-  write_status server blocked "SERVER_PRODUCTION_SMOKE_EVIDENCE_missing_or_not_passed"
+  write_status server blocked "SERVER_PRODUCTION_SMOKE_EVIDENCE_missing_or_contract_failed"
   if [[ "$RUN_SERVER_BASELINE" != "1" ]]; then
     write_status server skipped "RUN_SERVER_BASELINE=0"
     return

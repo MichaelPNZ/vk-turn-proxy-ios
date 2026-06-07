@@ -137,6 +137,10 @@ if [[ -n "$CLIENT_SMOKE_LOG" ]]; then
     echo "CLIENT_SMOKE_LOG does not exist: $CLIENT_SMOKE_LOG" >&2
     exit 1
   fi
+  if [[ ! -s "$CLIENT_SMOKE_LOG" ]]; then
+    echo "CLIENT_SMOKE_LOG is empty: $CLIENT_SMOKE_LOG" >&2
+    exit 1
+  fi
   cp "$CLIENT_SMOKE_LOG" "$EVIDENCE_DIR/client-smoke.log"
 fi
 
@@ -173,9 +177,20 @@ if [[ "$MODE" == "final" ]]; then
     echo "Production readyz did not return ready" >&2
     exit 1
   fi
+  if ! grep -q ':56080' "$EVIDENCE_DIR/listeners.txt"; then
+    echo "Production listener evidence does not show :56080 admin health listener" >&2
+    exit 1
+  fi
+  if ! grep -q '^vk_turn_proxy_' "$EVIDENCE_DIR/metrics-head.txt"; then
+    echo "Production metrics did not return vk_turn_proxy metrics" >&2
+    exit 1
+  fi
   "$ROOT_DIR/scripts/write-smoke-evidence-summary.sh" server_production_smoke "$EVIDENCE_DIR"
 else
   "$ROOT_DIR/scripts/write-smoke-evidence-summary.sh" server_production_baseline "$EVIDENCE_DIR"
 fi
 cat "$EVIDENCE_DIR/server-status.txt" >> "$EVIDENCE_DIR/summary.txt"
+if [[ "$MODE" == "final" ]]; then
+  printf 'production_client_smoke_log=present\n' >> "$EVIDENCE_DIR/summary.txt"
+fi
 printf 'evidence_dir=%s\n' "$EVIDENCE_DIR"
