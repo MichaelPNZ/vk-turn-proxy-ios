@@ -545,6 +545,7 @@ check_shell_syntax \
   scripts/preflight-android-release.sh \
   scripts/preflight-testflight.sh \
   scripts/preflight-windows-desktop.sh \
+  scripts/smoke-android-release-with-public-server.sh \
   scripts/smoke-android-release-imported-profile.sh \
   scripts/server-public-smoke-vps.sh \
   scripts/smoke-android-imported-profile.sh \

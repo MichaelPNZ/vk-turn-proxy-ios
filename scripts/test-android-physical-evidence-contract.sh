@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TAG="${TAG:-v1.0-build161}"
+TAG="${TAG:-v1.0-build162}"
 TMP_DIR="$(mktemp -d "$ROOT_DIR/build/test-android-physical-evidence.XXXXXX")"
 
 cleanup() {

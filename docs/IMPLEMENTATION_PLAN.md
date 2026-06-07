@@ -392,6 +392,7 @@ Current verification:
   - stopped the VPN and verified cleanup.
 - `scripts/smoke-android-release-imported-profile.sh` now accepts `IMPORT_LINK` and `PROFILE_FILE`, so physical-device smoke can use an exported full backup or connection JSON without reading the macOS iOS preferences plist.
 - `scripts/smoke-android-release-imported-profile.sh` writes a bounded evidence directory with summary, APK sha256, UI dumps, filtered logcat, package info, and connectivity snapshots; `REQUIRE_PHYSICAL_DEVICE=1` rejects emulator devices for the physical-release gate.
+- `scripts/smoke-android-release-with-public-server.sh` keeps the temporary VPS public second-port server alive while `scripts/smoke-android-release-imported-profile.sh` runs, captures combined server/client evidence, stops the temporary server in cleanup, and refuses production port `56004`.
 - `SERIAL=emulator-5554 ANDROID_HOME=/Users/mihailpozalov/Library/Android/sdk BUILD_RELEASE=0 scripts/smoke-android-release-imported-profile.sh` passed again after adding the Android diagnostics panel.
 - `SERIAL=emulator-5554 ANDROID_HOME=/Users/mihailpozalov/Library/Android/sdk BUILD_RELEASE=0 NUM_CONNECTIONS=10 EVIDENCE_DIR=build/android-release-smoke/default10-emulator-v156 scripts/smoke-android-release-imported-profile.sh` passed for build 156 with the new fresh/default stability setting; evidence shows SRTP/TURN session establishment, WireGuard attach, active VPN network, and clean VPN stop.
 - External smoke kit includes `commands/android-physical-smoke.sh`, which forces `REQUIRE_PHYSICAL_DEVICE=1` and prints `ANDROID_PHYSICAL_SMOKE_EVIDENCE=<dir>` after a passed physical-device smoke.
@@ -494,13 +495,13 @@ Remaining:
 
 ## Immediate Next Tasks
 
-1. Run physical Android device smoke with the signed release APK and current imported-profile flow; emulator signed-release imported-profile smoke already passes.
+1. Run Android release smoke through `scripts/smoke-android-release-with-public-server.sh` on a booted emulator, then repeat on a physical Android device with `REQUIRE_PHYSICAL_DEVICE=1`.
 2. Run physical iPhone smoke with the current Network Extension build.
 3. Run `desktopApp` and `vk-turn-proxy-windows-service.exe` on a Windows host, verify current profile import, validate `start-request.json`, and run strict `windows-preflight --service-exe <path>`.
 4. Install/create an `Apple Distribution` signing identity and remove the revoked development identity from keychain.
 5. Prepare `VKTurnProxy/AppStoreConnect.env` with `scripts/configure-testflight-env.sh` and run `scripts/preflight-testflight.sh`.
 6. Re-run `scripts/local-readiness-gate.sh` after external signing setup.
-7. Run `scripts/release-blockers-status.sh v1.0-build161` to confirm the remaining external blockers before final smoke collection.
+7. Run `scripts/release-blockers-status.sh v1.0-build162` to confirm the remaining external blockers before final smoke collection.
 8. Run the external smokes and save evidence paths for Android physical, iPhone TestFlight, signed macOS Packet Tunnel, Windows runtime, Windows installer, and production server/client smoke.
 9. Run `scripts/final-release-readiness.sh <tag>` with the evidence environment variables set.
 10. Run `./release.sh <tag> all` after final readiness passes; it uploads iOS/macOS to TestFlight and attaches Android APK/AAB, Windows runtime zip, optional Windows setup EXE, Linux server package, cross-platform checksum manifest, and full release checksum manifest to GitHub Release.

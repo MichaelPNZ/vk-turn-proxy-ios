@@ -60,6 +60,23 @@ SERIAL=<adb-device-id> \
   scripts/smoke-android-release-imported-profile.sh
 ```
 
+To test through the temporary VPS public second port before promoting
+production `56004`, use the orchestrator instead:
+
+```bash
+SERIAL=<adb-device-id> \
+  ANDROID_HOME=/Users/mihailpozalov/Library/Android/sdk \
+  REQUIRE_PHYSICAL_DEVICE=1 \
+  PROFILE_FILE=/absolute/path/to/full-backup-or-connection.json \
+  scripts/smoke-android-release-with-public-server.sh \
+  build/evidence/android-physical-public-server-$(date +%Y%m%d-%H%M%S)
+```
+
+When using `PROFILE_FILE` or `IMPORT_LINK`, make sure that payload points at the
+temporary server, for example `142.252.220.91:56014`. The orchestrator prints
+`ANDROID_PHYSICAL_SMOKE_EVIDENCE=<dir>/android`; use that nested Android
+evidence directory for final readiness.
+
 The smoke prints `evidence_dir=...` on success. Use that directory as
 `ANDROID_PHYSICAL_SMOKE_EVIDENCE` for `scripts/final-release-readiness.sh`.
 The summary must contain `result=passed`, `evidence_type=android_physical_smoke`,
@@ -74,9 +91,9 @@ Final readiness also requires the runtime evidence files written by the smoke:
 The external smoke kit also writes a physical-device wrapper:
 
 ```bash
-scripts/prepare-external-smoke-kit.sh v1.0-build161
+scripts/prepare-external-smoke-kit.sh v1.0-build162
 PROFILE_FILE=/absolute/path/to/full-backup-or-connection.json \
-  build/external-smoke-kit/v1.0-build161/commands/android-physical-smoke.sh
+  build/external-smoke-kit/v1.0-build162/commands/android-physical-smoke.sh
 ```
 
 The wrapper prints `ANDROID_PHYSICAL_SMOKE_EVIDENCE=<dir>` when the smoke

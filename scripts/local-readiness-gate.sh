@@ -8,7 +8,7 @@ RUN_VPS_DRY_RUN="${RUN_VPS_DRY_RUN:-0}"
 RUN_ANDROID_RELEASE_SMOKE="${RUN_ANDROID_RELEASE_SMOKE:-0}"
 HOST="${HOST:-142.252.220.91}"
 SSH_USER="${SSH_USER:-root}"
-TAG="${TAG:-v1.0-build161}"
+TAG="${TAG:-v1.0-build162}"
 
 banner() {
   printf '\n==> %s\n' "$*"
@@ -73,6 +73,7 @@ check_shell_syntax \
   scripts/preflight-android-release.sh \
   scripts/preflight-testflight.sh \
   scripts/preflight-windows-desktop.sh \
+  scripts/smoke-android-release-with-public-server.sh \
   scripts/smoke-android-release-imported-profile.sh \
   scripts/server-public-smoke-vps.sh \
   scripts/smoke-android-imported-profile.sh \
@@ -117,11 +118,13 @@ banner "Running Android release preflight"
 EXPECTED_ANDROID_VERSION_CODE="${TAG##*build}" ANDROID_HOME="$ANDROID_HOME" scripts/preflight-android-release.sh
 
 if [[ "$RUN_ANDROID_RELEASE_SMOKE" == "1" ]]; then
-  banner "Running Android signed release imported-profile smoke"
-  ANDROID_HOME="$ANDROID_HOME" scripts/smoke-android-release-imported-profile.sh
+  banner "Running Android signed release smoke against temporary public server"
+  ANDROID_HOME="$ANDROID_HOME" \
+    scripts/smoke-android-release-with-public-server.sh \
+    "build/evidence/android-release-public-server-${TAG}"
 else
   banner "Skipping Android signed release imported-profile smoke"
-  printf 'Set RUN_ANDROID_RELEASE_SMOKE=1 with an attached/booted Android device or emulator to run it.\n'
+  printf 'Set RUN_ANDROID_RELEASE_SMOKE=1 with an attached/booted Android device or emulator to run it against a temporary public VPS port.\n'
 fi
 
 banner "Running Windows desktop preflight with external blockers allowed"

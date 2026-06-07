@@ -20,4 +20,10 @@ if PUBLIC_LISTEN=0.0.0.0:56004 "$ROOT_DIR/scripts/collect-server-public-smoke-ev
 fi
 grep -q 'Refusing to use production port 56004' "$TMP_DIR/refuse.out"
 
+if PUBLIC_LISTEN=0.0.0.0:56004 "$ROOT_DIR/scripts/smoke-android-release-with-public-server.sh" "$TMP_DIR/android-refuse" > "$TMP_DIR/android-refuse.out" 2>&1; then
+  echo "Android public smoke orchestrator must refuse production port 56004." >&2
+  exit 1
+fi
+grep -q 'Refusing to use production port 56004' "$TMP_DIR/android-refuse.out"
+
 printf 'server public smoke evidence contract ok\n'

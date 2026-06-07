@@ -75,7 +75,19 @@ Expected staged files:
 
 Before promoting production `56004`, run one client against a public second port.
 
-Use the public smoke helper:
+For Android release smoke, use the public-server orchestrator. It starts the
+temporary second-port server, runs the Android release smoke against it, captures
+server and client evidence, then stops the temporary server:
+
+```bash
+ANDROID_HOME=/Users/mihailpozalov/Library/Android/sdk \
+  SERIAL=emulator-5554 \
+  BUILD_RELEASE=0 \
+  scripts/smoke-android-release-with-public-server.sh \
+  build/evidence/android-release-public-server-$(date +%Y%m%d-%H%M%S)
+```
+
+Use the public smoke helper only for server-only evidence:
 
 ```bash
 scripts/collect-server-public-smoke-evidence.sh \
@@ -99,12 +111,13 @@ Then import a test profile pointing at:
 142.252.220.91:56014
 ```
 
-For the Android emulator smoke script, override only the peer address:
+For direct Android smoke without the orchestrator, keep the temporary server
+running manually and override only the peer address:
 
 ```bash
 ANDROID_HOME=/Users/mihailpozalov/Library/Android/sdk \
   PEER_ADDRESS=142.252.220.91:56014 \
-  scripts/smoke-android-imported-profile.sh
+  scripts/smoke-android-release-imported-profile.sh
 ```
 
 Inspect the temporary server:
